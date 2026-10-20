@@ -145,11 +145,24 @@ Panel {
     applyProc.running = true
   }
 
-  // Settings live in shell.json; Hyprland follows them. Re-apply whenever the
-  // two disagree (a setting changed, or first run after install).
+  // Settings live in shell.json; Hyprland follows them. Nothing is written to
+  // the user's Hyprland config until they act in the plugin (add, remove or
+  // reorder a language, or change a setting): installing it alone never edits
+  // their config. Once set up, re-apply whenever shell.json and Hyprland disagree.
+  readonly property bool managed: root.appliedArgs !== ""
+  property bool settingsTouched: false
+
   function syncSettings() {
     if (!root.stateLoaded || applyProc.running || root.active.length === 0) return
+    if (!root.managed && !root.settingsTouched) return
     if (argsFor(root.active).join("|") !== root.appliedArgs) applyEntries(root.active)
+  }
+
+  function settingChanged() {
+    // Settings arriving with the widget at startup are not a user action.
+    if (settingsReady.running) return
+    root.settingsTouched = true
+    settingsTimer.restart()
   }
 
   function setSetting(key, value) {
@@ -195,9 +208,15 @@ Panel {
     refresh()
   }
 
-  onSwitchValueChanged: settingsTimer.restart()
-  onNextLanguageKeyChanged: settingsTimer.restart()
-  onPanelKeyChanged: settingsTimer.restart()
+  onSwitchValueChanged: settingChanged()
+  onNextLanguageKeyChanged: settingChanged()
+  onPanelKeyChanged: settingChanged()
+
+  Timer {
+    id: settingsReady
+    interval: 3000
+    running: true
+  }
 
   onOpenedChanged: {
     if (opened) {
@@ -593,6 +612,16 @@ Panel {
       }
 
       SettingLabel { text: "Keybindings" }
+      Text {
+        width: parent.width
+        visible: !root.managed
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        text: "Not set up yet. Your Hyprland config is untouched until you add a language or change a setting here."
+        color: Qt.darker(root.fg, 1.3)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
       Repeater {
         model: [
           { title: "Switch to next language", key: "nextLanguageKey", value: root.nextLanguageKey, status: root.nextKeyStatus, fallback: "SUPER + SHIFT + K",

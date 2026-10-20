@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "blackcode.language",
   "name": "Keyboard Languages",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "BlackCode",
   "license": "MIT",
   "description": "Bar keyboard-language switcher: pick from every xkb layout (English, Arabic, and the rest of the world), switch with a click or shortcut",

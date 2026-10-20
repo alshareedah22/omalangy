@@ -1,5 +1,7 @@
 # Keyboard Languages for Omarchy
 
+![The keyboard languages panel open from the bar](preview.png)
+
 A keyboard-language switcher for the Omarchy bar. It shows a small keyboard
 icon and the current language code (`󰌌 EN`, `󰌌 AR`, ...). Click it to open a
 panel where you can:
@@ -63,6 +65,11 @@ omarchy bar set blackcode.language panelKey ""
 ```
 
 ## Safe by design
+
+- **Nothing changes until you ask.** Installing the plugin only adds the bar
+  icon. Your Hyprland config is first touched when you add, remove or reorder
+  a language, or change a switch key or keybinding in the panel. Until then
+  the panel says "Not set up yet".
 
 - Your languages are saved to their own file, `~/.config/hypr/keyboard-languages.lua`.
   Your `input.lua` and other Hyprland files are never rewritten.
