@@ -2,16 +2,20 @@
 
 # Backend for the blackcode.language bar widget.
 #
-# Keyboard languages are written to their own Hyprland module,
-# ~/.config/hypr/keyboard-languages.lua, which hyprland.lua loads last through
-# a pcall'd require. Nothing else in the user's config is rewritten, and a
-# missing or broken module can never stop Hyprland from loading.
+# Keyboard languages and the plugin's keybindings are written to their own
+# Hyprland module, ~/.config/hypr/keyboard-languages.lua, which hyprland.lua
+# loads last through a pcall'd require. Nothing else in the user's config is
+# rewritten, and a missing or broken module can never stop Hyprland loading.
 #
-#   languagectl state                          JSON: layouts, variants, options, active index
-#   languagectl apply <layouts> <variants> <toggle>
-#                                              e.g. apply "us,ara" "," grp:alts_toggle
-#   languagectl switch <index|next|prev>       switch every keyboard to that layout
-#   languagectl uninstall                      remove the module and the hook line
+#   languagectl state
+#       JSON: layouts, variants, options, active index, keybinding status
+#   languagectl apply <layouts> <variants> <switch-keys> <next-key> <panel-key>
+#       e.g. apply "us,ara" "," alts "SUPER + SHIFT + K" "SUPER + CTRL + ALT + K"
+#       switch-keys: alts | menu | rctrl | off     (an empty key turns a binding off)
+#   languagectl check
+#       drop any of our keybindings that something else has since claimed
+#   languagectl switch <index|next|prev>
+#   languagectl uninstall
 
 set -euo pipefail
 
@@ -21,6 +25,10 @@ MODULE_FILE="$HYPR_DIR/$MODULE_NAME.lua"
 HYPRLAND_FILE="$HYPR_DIR/hyprland.lua"
 HOOK_MARKER="-- Keyboard languages from the bar (blackcode.language plugin)."
 HOOK_LINE="pcall(require, \"hypr.$MODULE_NAME\")"
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/blackcode-language.lock"
+
+NEXT_DESC="Next keyboard language"
+PANEL_DESC="Keyboard languages"
 
 fail() {
   echo "languagectl: $*" >&2
@@ -31,21 +39,92 @@ option_str() {
   hyprctl -j getoption "$1" 2>/dev/null | jq -r '.str // ""'
 }
 
-# Same keyboards the built-in widget ignores: buttons and the fcitx5 virtual
-# keyboard carry a layout list without anyone typing on them.
-typed_keyboards='[.keyboards[] | select(.name | test("^(hl-virtual-keyboard|power-button|sleep-button|lid-switch|video-bus)") | not)]'
+# Switch keys handled by xkb itself. Only combinations Omarchy leaves free:
+# Shift+Alt (Alt+Tab back, web-app shortcuts) and Ctrl+Shift (terminal
+# copy/paste) are taken, Caps Lock is the compose key, both Shifts are Caps
+# Lock, and Super+Space is the launcher.
+xkb_toggle() {
+  case "$1" in
+  alts) echo "grp:alts_toggle" ;;
+  menu) echo "grp:menu_toggle" ;;
+  rctrl) echo "grp:rctrl_toggle" ;;
+  off | "") echo "" ;;
+  *) fail "unknown switch keys: $1 (use alts, menu, rctrl or off)" ;;
+  esac
+}
+
+# "SUPER + SHIFT + K" -> "65|K", the shape `hyprctl binds -j` reports.
+combo_id() {
+  local combo="$1" mask=0 key="" part
+  IFS='+' read -ra parts <<<"$combo"
+  for part in "${parts[@]}"; do
+    part=$(echo "$part" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    case "$part" in
+    SHIFT) mask=$((mask | 1)) ;;
+    CAPS) mask=$((mask | 2)) ;;
+    CTRL | CONTROL) mask=$((mask | 4)) ;;
+    ALT) mask=$((mask | 8)) ;;
+    SUPER | WIN | LOGO | MOD4) mask=$((mask | 64)) ;;
+    "") ;;
+    *) key="$part" ;;
+    esac
+  done
+  [[ -n $key ]] || return 1
+  echo "$mask|$key"
+}
+
+valid_combo() {
+  [[ $1 =~ ^[A-Za-z0-9_\ +]+$ ]] && combo_id "$1" >/dev/null
+}
+
+# Description of whatever else (not this plugin) is bound to a combo, if anything.
+bound_elsewhere() {
+  local id="$1"
+  hyprctl -j binds 2>/dev/null | jq -r --arg id "$id" --arg a "$NEXT_DESC" --arg b "$PANEL_DESC" '
+    .[] | select("\(.modmask)|\(.key | ascii_upcase)" == $id)
+        | select(.description != $a and .description != $b)
+        | (if (.description // "") != "" then .description else "\(.dispatcher) \(.arg)" end)' | head -1
+}
+
+saved_args() {
+  [[ -f $MODULE_FILE ]] || return 0
+  sed -n 's/^-- args: //p' "$MODULE_FILE" | head -1
+}
+
+key_status() {
+  local combo="$1" desc="$2" id other
+  if [[ -z $combo ]] || ! id=$(combo_id "$combo"); then
+    echo '{"combo":"","status":"off","conflict":""}'
+    return
+  fi
+  other=$(bound_elsewhere "$id")
+  if [[ -n $other ]]; then
+    jq -cn --arg c "$combo" --arg o "$other" '{combo: $c, status: "conflict", conflict: $o}'
+  elif hyprctl -j binds | jq -e --arg d "$desc" 'any(.[]; .description == $d)' >/dev/null; then
+    jq -cn --arg c "$combo" '{combo: $c, status: "active", conflict: ""}'
+  else
+    jq -cn --arg c "$combo" '{combo: $c, status: "pending", conflict: ""}'
+  fi
+}
 
 state() {
-  local devices
+  local devices args next_key="" panel_key=""
   devices=$(hyprctl -j devices 2>/dev/null || echo '{"keyboards":[]}')
+  args=$(saved_args)
+  if [[ -n $args ]]; then
+    next_key=$(cut -d'|' -f4 <<<"$args")
+    panel_key=$(cut -d'|' -f5 <<<"$args")
+  fi
 
   jq -cn \
     --arg layouts "$(option_str input:kb_layout)" \
     --arg variants "$(option_str input:kb_variant)" \
     --arg options "$(option_str input:kb_options)" \
     --argjson devices "$devices" \
-    --arg managed "$([[ -f $MODULE_FILE ]] && echo 1 || echo 0)" '
-    ($devices | '"$typed_keyboards"') as $kbs
+    --argjson nextKey "$(key_status "$next_key" "$NEXT_DESC")" \
+    --argjson panelKey "$(key_status "$panel_key" "$PANEL_DESC")" \
+    --arg applied "$args" '
+    ($devices | [.keyboards[] | select(.name | test("^(hl-virtual-keyboard|power-button|sleep-button|lid-switch|video-bus)") | not)]) as $kbs
     | (($kbs | map(select(.main)) | first) // ($kbs | max_by(.active_layout_index // 0)) // {}) as $kb
     | {
         layouts: ($layouts | split(",")),
@@ -53,12 +132,18 @@ state() {
         options: $options,
         active: ($kb.active_layout_index // 0),
         activeKeymap: ($kb.active_keymap // ""),
-        managed: ($managed == "1")
+        applied: $applied,
+        nextKey: $nextKey,
+        panelKey: $panelKey
       }'
 }
 
 valid_list() {
   [[ $1 =~ ^[A-Za-z0-9_,-]*$ ]]
+}
+
+lua_str() {
+  printf '"%s"' "${1//\"/\\\"}"
 }
 
 ensure_hook() {
@@ -70,39 +155,106 @@ ensure_hook() {
 }
 
 apply() {
-  local layouts="${1:-}" variants="${2:-}" toggle="${3:-grp:alts_toggle}"
+  local layouts="${1:-}" variants="${2:-}" switch_keys="${3:-alts}" next_key="${4:-}" panel_key="${5:-}"
 
   [[ -n $layouts ]] || fail "no layouts given"
   valid_list "$layouts" || fail "invalid layouts: $layouts"
   valid_list "$variants" || fail "invalid variants: $variants"
-  [[ $toggle =~ ^(none|grp:[a-z_]+)$ ]] || fail "invalid toggle: $toggle"
+  [[ -z $next_key ]] || valid_combo "$next_key" || fail "invalid keybinding: $next_key"
+  [[ -z $panel_key ]] || valid_combo "$panel_key" || fail "invalid keybinding: $panel_key"
+  if [[ -n $next_key && -n $panel_key && $(combo_id "$next_key") == $(combo_id "$panel_key") ]]; then
+    fail "both keybindings are $next_key; pick two different ones"
+  fi
+
+  local toggle
+  toggle=$(xkb_toggle "$switch_keys")
 
   # Keep every option the user already has (compose key, caps lock, ...) and
   # replace only the layout-switch shortcut.
   local base options
   base=$(option_str input:kb_options | tr ',' '\n' | grep -v '^grp:' | grep -v '^$' | paste -sd, || true)
   options="$base"
-  if [[ $toggle != none && $layouts == *,* ]]; then
+  if [[ -n $toggle && $layouts == *,* ]]; then
     options="${options:+$options,}$toggle"
   fi
   [[ $options =~ ^[A-Za-z0-9_:,()+-]*$ ]] || fail "unexpected kb_options: $options"
+
+  # Never bind over something Omarchy (or the user) already uses.
+  local binds="" other warnings=()
+  if [[ -n $next_key ]]; then
+    other=$(bound_elsewhere "$(combo_id "$next_key")")
+    if [[ -n $other ]]; then
+      warnings+=("$next_key is already \"$other\"; next-language shortcut left off")
+    else
+      binds+="  o.bind($(lua_str "$next_key"), $(lua_str "$NEXT_DESC"), \"hyprctl switchxkblayout all next\")"$'\n'
+    fi
+  fi
+  if [[ -n $panel_key ]]; then
+    other=$(bound_elsewhere "$(combo_id "$panel_key")")
+    if [[ -n $other ]]; then
+      warnings+=("$panel_key is already \"$other\"; panel shortcut left off")
+    else
+      binds+="  o.bind($(lua_str "$panel_key"), $(lua_str "$PANEL_DESC"), \"omarchy-shell -q blackcode.language toggle\")"$'\n'
+    fi
+  fi
 
   local config="hl.config({ input = { kb_layout = \"$layouts\", kb_variant = \"$variants\", kb_options = \"$options\" } })"
 
   mkdir -p "$HYPR_DIR"
   local tmp
   tmp=$(mktemp "$HYPR_DIR/.$MODULE_NAME.XXXXXX")
-  cat >"$tmp" <<EOF
--- Managed by the blackcode.language Omarchy bar plugin.
--- Change languages from the keyboard icon on the bar; edits here are overwritten.
--- Remove with: languagectl uninstall (in the plugin folder).
-$config
-EOF
-  mv "$tmp" "$MODULE_FILE"
-  ensure_hook
+  {
+    echo "-- Managed by the blackcode.language Omarchy bar plugin."
+    echo "-- Change languages and shortcuts from the keyboard icon on the bar; edits here are overwritten."
+    echo "-- args: $layouts|$variants|$switch_keys|$next_key|$panel_key"
+    echo "$config"
+    if [[ -n $binds ]]; then
+      echo
+      echo "if o and o.bind then"
+      printf '%s' "$binds"
+      echo "end"
+    fi
+  } >"$tmp"
 
-  # Apply right away rather than waiting on Hyprland's file watcher.
-  hyprctl eval "$config" >/dev/null
+  # Skip the reload entirely when nothing changed.
+  if [[ -f $MODULE_FILE ]] && cmp -s "$tmp" "$MODULE_FILE"; then
+    rm -f "$tmp"
+  else
+    mv "$tmp" "$MODULE_FILE"
+    ensure_hook
+    hyprctl reload config-only >/dev/null
+  fi
+
+  local w
+  for w in "${warnings[@]}"; do echo "$w" >&2; done
+  return 0
+}
+
+# Run after every config reload: if an Omarchy update or the user's own
+# bindings.lua now uses one of our shortcuts, rewrite the module without it so
+# the two never fire together.
+check() {
+  local args key id conflict=""
+  args=$(saved_args)
+  [[ -n $args ]] || return 0
+
+  local l v s n p
+  IFS='|' read -r l v s n p <<<"$args"
+  for key in "$n" "$p"; do
+    [[ -n $key ]] || continue
+    id=$(combo_id "$key") || continue
+    if [[ -n $(bound_elsewhere "$id") ]] && grep -qF -e "o.bind($(lua_str "$key")" "$MODULE_FILE"; then
+      conflict="$key"
+    fi
+  done
+  [[ -n $conflict ]] || return 0
+
+  local out
+  out=$(apply "$l" "$v" "$s" "$n" "$p" 2>&1 || true)
+  if [[ -n $out ]]; then
+    command -v notify-send >/dev/null && notify-send -a "Keyboard languages" "Shortcut turned off" "$out" || true
+    echo "$out" >&2
+  fi
 }
 
 switch_layout() {
@@ -126,11 +278,16 @@ uninstall() {
 
 case "${1:-}" in
 state) state ;;
-apply) shift; apply "$@" ;;
 switch) shift; switch_layout "$@" ;;
-uninstall) uninstall ;;
+apply | check | uninstall)
+  # One writer at a time: the bar runs one widget per monitor.
+  exec 9>"$LOCK_FILE"
+  flock -w 10 9 || fail "another languagectl is still running"
+  cmd="$1"; shift
+  "$cmd" "$@"
+  ;;
 *)
-  echo "Usage: languagectl state | apply <layouts> <variants> <toggle> | switch <index|next|prev> | uninstall" >&2
+  echo "Usage: languagectl state | apply <layouts> <variants> <alts|menu|rctrl|off> <next-key> <panel-key> | check | switch <index|next|prev> | uninstall" >&2
   exit 1
   ;;
 esac

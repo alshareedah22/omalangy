@@ -12,34 +12,53 @@ Panel {
   ipcTarget: "blackcode.language"
   manageIpc: true
 
-  // Settings (shell.json → bar layout entry):
-  //   "showIcon": false   show only the language code on the bar (default: keyboard icon + code)
-  readonly property bool showIcon: setting("showIcon", true) !== false
+  // ---- Settings (shell.json → this widget's bar entry; see manifest schema) ----
+  // Change them from the panel's Settings section, or:
+  //   omarchy bar set blackcode.language <key> "<value>"
+  readonly property string labelStyle: {
+    const v = setting("label", "")
+    if (v) return String(v)
+    return setting("showIcon", true) === false ? "Code only" : "Icon and code" // 1.0 setting
+  }
+  readonly property string switchKeys: String(setting("switchKeys", "Both Alt keys"))
+  readonly property string nextLanguageKey: String(setting("nextLanguageKey", "SUPER + SHIFT + K"))
+  readonly property string panelKey: String(setting("panelKey", "SUPER + CTRL + ALT + K"))
+
+  readonly property var labelOptions: ["Icon and code", "Code only", "Icon only"]
+  // Only keys Omarchy leaves free. Alt+Shift and Ctrl+Shift are not offered:
+  // Omarchy binds Shift+Alt+Tab and web-app Shift+Alt shortcuts, and terminals
+  // use Ctrl+Shift+C / V, so an xkb toggle there would fire on every copy.
+  readonly property var switchOptions: [
+    { label: "Both Alt keys", value: "alts" },
+    { label: "Menu key", value: "menu" },
+    { label: "Right Ctrl", value: "rctrl" },
+    { label: "Off", value: "off" }
+  ]
+  readonly property string switchValue: {
+    for (let i = 0; i < switchOptions.length; i++)
+      if (switchOptions[i].label === switchKeys) return switchOptions[i].value
+    return "alts"
+  }
 
   readonly property string ctl: decodeURIComponent(String(Qt.resolvedUrl("languagectl")).replace(/^file:\/\//, ""))
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : ""
 
   // ---- Live state, read from Hyprland ----
+  property bool stateLoaded: false
   property var layouts: []
   property var variants: []
-  property string options: ""
   property int activeIndex: 0
   property string activeKeymap: ""
+  property string appliedArgs: ""
+  property var nextKeyStatus: ({ combo: "", status: "off", conflict: "" })
+  property var panelKeyStatus: ({ combo: "", status: "off", conflict: "" })
   property string errorText: ""
 
   property var catalog: []
   readonly property var active: LanguageModel.activeEntries(layouts, variants, catalog)
   readonly property var current: active.length > activeIndex ? active[activeIndex] : null
   readonly property string currentCode: current ? current.code : ""
-  readonly property string toggle: LanguageModel.toggleFromOptions(options)
-
-  readonly property var toggles: [
-    { key: "grp:alts_toggle", label: "Both Alt" },
-    { key: "grp:alt_shift_toggle", label: "Alt+Shift" },
-    { key: "grp:ctrl_shift_toggle", label: "Ctrl+Shift" },
-    { key: "none", label: "Bar only" }
-  ]
 
   // ---- Search ----
   property string query: ""
@@ -63,11 +82,14 @@ Panel {
     if (root.bar) root.bar.run(Util.shellQuote(root.ctl) + " switch " + Util.shellQuote(String(target)))
   }
 
-  function applyEntries(entries, toggleKey) {
-    const list = LanguageModel.normalize(entries)
-    const args = LanguageModel.toArgs(list)
+  function argsFor(entries) {
+    const a = LanguageModel.toArgs(LanguageModel.normalize(entries))
+    return [a.layouts, a.variants, root.switchValue, root.nextLanguageKey.trim(), root.panelKey.trim()]
+  }
+
+  function applyEntries(entries) {
     root.errorText = ""
-    root.pendingApply = [root.ctl, "apply", args.layouts, args.variants, toggleKey || root.toggle]
+    root.pendingApply = [root.ctl, "apply"].concat(argsFor(entries))
     if (!applyProc.running) runPendingApply()
   }
 
@@ -78,11 +100,20 @@ Panel {
     applyProc.running = true
   }
 
+  // Settings live in shell.json; Hyprland follows them. Re-apply whenever the
+  // two disagree (a setting changed, or first run after install).
+  function syncSettings() {
+    if (!root.stateLoaded || applyProc.running || root.active.length === 0) return
+    if (argsFor(root.active).join("|") !== root.appliedArgs) applyEntries(root.active)
+  }
+
+  function setSetting(key, value) {
+    if (root.bar) root.bar.run("omarchy bar set " + root.moduleName + " " + key + " " + Util.shellQuote(String(value)))
+  }
+
   function addEntry(entry) {
     if (!entry) return
-    const next = root.active.concat([{ layout: entry.layout, variant: entry.variant, key: entry.key }])
-    // A new layout with no switch shortcut yet gets Omarchy's usual one.
-    applyEntries(next, root.active.length === 1 && root.toggle === "none" ? "grp:alts_toggle" : root.toggle)
+    applyEntries(root.active.concat([{ layout: entry.layout, variant: entry.variant, key: entry.key }]))
     searchField.text = ""
   }
 
@@ -105,6 +136,11 @@ Panel {
     applyEntries(next)
   }
 
+  function keyText(status) {
+    if (!status || status.status === "off" || !status.combo) return "Off"
+    return status.combo
+  }
+
   function ensureCatalog() {
     if (root.catalog.length === 0 && !catalogProc.running) catalogProc.running = true
   }
@@ -113,6 +149,10 @@ Panel {
     ensureCatalog()
     refresh()
   }
+
+  onSwitchValueChanged: settingsTimer.restart()
+  onNextLanguageKeyChanged: settingsTimer.restart()
+  onPanelKeyChanged: settingsTimer.restart()
 
   onOpenedChanged: {
     if (opened) {
@@ -128,7 +168,10 @@ Panel {
     function onRawEvent(event) {
       if (!event || !event.name) return
       const name = String(event.name)
-      if (name.indexOf("activelayout") !== -1 || name === "configreloaded") refreshTimer.restart()
+      if (name.indexOf("activelayout") !== -1) refreshTimer.restart()
+      // After any reload (an Omarchy update, an edit to bindings.lua), give up
+      // a shortcut something else now owns, so the two never fire together.
+      if (name === "configreloaded") checkTimer.restart()
     }
   }
 
@@ -136,6 +179,18 @@ Panel {
     id: refreshTimer
     interval: 150
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: settingsTimer
+    interval: 400
+    onTriggered: root.syncSettings()
+  }
+
+  Timer {
+    id: checkTimer
+    interval: 500
+    onTriggered: if (!checkProc.running && !applyProc.running) checkProc.running = true
   }
 
   Process {
@@ -148,9 +203,13 @@ Panel {
         try { s = JSON.parse(text) } catch (e) { return }
         root.layouts = s.layouts || []
         root.variants = s.variants || []
-        root.options = s.options || ""
         root.activeIndex = s.active || 0
         root.activeKeymap = s.activeKeymap || ""
+        root.appliedArgs = s.applied || ""
+        root.nextKeyStatus = s.nextKey || root.nextKeyStatus
+        root.panelKeyStatus = s.panelKey || root.panelKeyStatus
+        root.stateLoaded = true
+        settingsTimer.restart()
       }
     }
   }
@@ -168,11 +227,59 @@ Panel {
   }
 
   Process {
+    id: checkProc
+    command: [root.ctl, "check"]
+    onExited: refreshTimer.restart()
+  }
+
+  Process {
     id: catalogProc
     command: ["xkbcli", "list", "--load-exotic"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.catalog = LanguageModel.parseCatalog(text)
+    }
+  }
+
+  // ---- Small building blocks for the Settings section ----
+  component SettingLabel: Text {
+    textFormat: Text.PlainText
+    color: Qt.darker(root.fg, 1.3)
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  component Chip: CursorSurface {
+    id: chip
+    property string label: ""
+    property bool selected: false
+    signal picked()
+
+    width: chipText.implicitWidth + Style.space(18)
+    height: chipText.implicitHeight + Style.space(10)
+    current: selected
+    outline: !selected
+    hasCursor: chipMouse.containsMouse
+    foreground: root.fg
+    accent: Color.accent
+
+    Text {
+      id: chipText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: chip.label
+      color: chip.selected ? Color.accent : root.fg
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: chip.selected
+    }
+
+    MouseArea {
+      id: chipMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: if (!chip.selected || chip.label === "On") chip.picked()
     }
   }
 
@@ -184,7 +291,8 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.currentCode === "" ? "󰌌" : (root.showIcon ? "󰌌 " + root.currentCode : root.currentCode)
+    text: root.currentCode === "" || root.labelStyle === "Icon only" ? "󰌌"
+      : (root.labelStyle === "Code only" ? root.currentCode : "󰌌 " + root.currentCode)
     fontSize: Style.font.caption
     horizontalMargin: 6
     tooltipText: (root.activeKeymap || "Keyboard language") + (root.active.length > 1 ? "\nRight-click or scroll to switch" : "")
@@ -203,8 +311,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: searchField
-    contentWidth: panel.fittedContentWidth(Style.space(340))
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(640))
+    contentWidth: panel.fittedContentWidth(Style.space(390))
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(860))
 
     Column {
       id: panelColumn
@@ -373,55 +481,118 @@ Panel {
         }
       }
 
-      // Switch shortcut
+      // Settings
       PanelSectionHeader {
-        text: "SWITCH WITH"
+        text: "SETTINGS"
         foreground: root.fg
         fontFamily: root.fontFamily
-        visible: root.active.length > 1
       }
 
+      SettingLabel { text: "Switch keys" }
       Flow {
         width: parent.width
         spacing: Style.space(6)
-        visible: root.active.length > 1
-
         Repeater {
-          model: root.toggles
-
-          CursorSurface {
-            id: chip
+          model: root.switchOptions
+          Chip {
             required property var modelData
-            readonly property bool selected: root.toggle === modelData.key
-
-            width: chipLabel.implicitWidth + Style.space(18)
-            height: chipLabel.implicitHeight + Style.space(10)
-            current: selected
-            outline: !selected
-            hasCursor: chipMouse.containsMouse
-            foreground: root.fg
-            accent: Color.accent
-
-            Text {
-              id: chipLabel
-              anchors.centerIn: parent
-              textFormat: Text.PlainText
-              text: chip.modelData.label
-              color: chip.selected ? Color.accent : root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: chip.selected
-            }
-
-            MouseArea {
-              id: chipMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: if (!chip.selected) root.applyEntries(root.active, chip.modelData.key)
-            }
+            label: modelData.label
+            selected: root.switchKeys === modelData.label
+            onPicked: root.setSetting("switchKeys", modelData.label)
           }
         }
+      }
+
+      SettingLabel { text: "Bar label" }
+      Flow {
+        width: parent.width
+        spacing: Style.space(6)
+        Repeater {
+          model: root.labelOptions
+          Chip {
+            required property var modelData
+            label: modelData
+            selected: root.labelStyle === modelData
+            onPicked: root.setSetting("label", modelData)
+          }
+        }
+      }
+
+      SettingLabel { text: "Keybindings" }
+      Repeater {
+        model: [
+          { title: "Next language", key: "nextLanguageKey", value: root.nextLanguageKey, status: root.nextKeyStatus, fallback: "SUPER + SHIFT + K" },
+          { title: "Open this panel", key: "panelKey", value: root.panelKey, status: root.panelKeyStatus, fallback: "SUPER + CTRL + ALT + K" }
+        ]
+
+        Item {
+          id: keyRow
+          required property var modelData
+          readonly property bool enabledKey: modelData.value.trim() !== ""
+          readonly property bool conflict: modelData.status && modelData.status.status === "conflict"
+
+          width: parent.width
+          implicitHeight: keyColumn.implicitHeight
+
+          Column {
+            id: keyColumn
+            anchors.left: parent.left
+            anchors.right: keyToggle.left
+            anchors.rightMargin: Style.space(8)
+            spacing: Style.space(2)
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideRight
+              text: keyRow.modelData.title
+              color: keyRow.conflict ? Color.urgent : root.fg
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideRight
+              text: keyRow.enabledKey ? keyRow.modelData.value.toUpperCase() : "Off"
+              color: keyRow.conflict ? Color.urgent : Qt.darker(root.fg, 1.3)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              visible: keyRow.conflict
+              wrapMode: Text.Wrap
+              text: "Used by Omarchy: \"" + (keyRow.modelData.status ? keyRow.modelData.status.conflict : "") + "\" · left off"
+              color: Color.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+
+          Chip {
+            id: keyToggle
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            label: keyRow.enabledKey ? "On" : "Off"
+            selected: keyRow.enabledKey && !keyRow.conflict
+            onPicked: root.setSetting(keyRow.modelData.key, keyRow.enabledKey ? "" : keyRow.modelData.fallback)
+          }
+        }
+      }
+
+      Text {
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        text: "Other keys: omarchy bar set " + root.moduleName + " nextLanguageKey \"SUPER + ALT + L\""
+        color: Qt.darker(root.fg, 1.6)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
       }
 
       PanelSeparator { foreground: root.fg }
@@ -466,7 +637,7 @@ Panel {
       ListView {
         id: resultList
         width: parent.width
-        height: Style.space(220)
+        height: Style.space(180)
         clip: true
         model: root.results
         boundsBehavior: Flickable.StopAtBounds

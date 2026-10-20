@@ -9,11 +9,52 @@ panel where you can:
   Persian, Hebrew, Russian, Japanese and the rest. Search works in English or
   in the language itself (`Arabic`, `عربي`, `Français`, `日本語`)
 - **Remove** a language (󰅖) or **reorder** it (󰁝)
-- **Pick the switch shortcut**: Both Alt keys (Omarchy's default), Alt+Shift,
-  Ctrl+Shift, or bar only
+- **Settings**: switch keys, bar label, and keybindings (see below)
 
 On the bar itself: **left-click** opens the panel, **right-click** or
 **scroll** switches to the next language.
+
+## Keybindings
+
+| Keys                      | Action                         | Notes |
+|---------------------------|--------------------------------|-------|
+| Left Alt + Right Alt      | Next language                  | Omarchy's own default for extra layouts |
+| `SUPER + SHIFT + K`       | Next language                  | Hyprland binding, changeable |
+| `SUPER + CTRL + ALT + K`  | Open the languages panel       | Hyprland binding, changeable |
+
+All three were checked against every Omarchy binding. The plugin also guards
+against future clashes:
+
+- Before binding a key, it asks Hyprland whether anything else (Omarchy, your
+  `bindings.lua`) already uses it. If so, it leaves its own shortcut off and
+  the panel shows the clash in red, e.g. *Used by Omarchy: "Herdr keybindings"*.
+- After every config reload (for example after `omarchy update`), it checks
+  again. If a new Omarchy binding takes one of its keys, it drops its own
+  binding and sends a notification, so two actions never fire on one key.
+- Alt+Shift and Ctrl+Shift are deliberately **not** offered as switch keys:
+  Omarchy uses Shift+Alt (Alt+Tab back, web-app shortcuts) and terminals use
+  Ctrl+Shift+C / V. Caps Lock (compose), both Shifts (Caps Lock) and
+  Super+Space (launcher) are taken too.
+
+## Settings
+
+Change them in the panel's **Settings** section, or from a terminal. They are
+stored on the widget's entry in `~/.config/omarchy/shell.json`, like every
+Omarchy widget setting, and declared in `manifest.json` (`defaults` + `schema`).
+
+| Setting           | Values                                              | Default |
+|-------------------|-----------------------------------------------------|---------|
+| `label`           | `Icon and code`, `Code only`, `Icon only`           | `Icon and code` |
+| `switchKeys`      | `Both Alt keys`, `Menu key`, `Right Ctrl`, `Off`    | `Both Alt keys` |
+| `nextLanguageKey` | any Hyprland combo, or empty to turn off            | `SUPER + SHIFT + K` |
+| `panelKey`        | any Hyprland combo, or empty to turn off            | `SUPER + CTRL + ALT + K` |
+
+```bash
+omarchy bar set blackcode.language label "Code only"
+omarchy bar set blackcode.language switchKeys "Menu key"
+omarchy bar set blackcode.language nextLanguageKey "SUPER + ALT + L"
+omarchy bar set blackcode.language panelKey ""
+```
 
 ## Safe by design
 
@@ -54,20 +95,6 @@ avoid seeing the code twice. To put it back:
 
 ```bash
 omarchy bar put omarchy.keyboard-layout --after omarchy.clock
-```
-
-## Settings
-
-Show only the code, without the keyboard icon:
-
-```bash
-omarchy bar set blackcode.language showIcon false --json
-```
-
-Open the panel from a keybinding (e.g. in `~/.config/hypr/bindings.lua`):
-
-```lua
-o.bind("SUPER + CTRL + K", "Keyboard languages", "omarchy-shell blackcode.language toggle")
 ```
 
 ## Remove
