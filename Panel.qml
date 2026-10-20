@@ -8,13 +8,13 @@ import "LanguageModel.js" as LanguageModel
 
 Panel {
   id: root
-  moduleName: "blackcode.language"
-  ipcTarget: "blackcode.language"
+  moduleName: "blackcode.omalangy"
+  ipcTarget: "blackcode.omalangy"
   manageIpc: true
 
   // ---- Settings (shell.json → this widget's bar entry; see manifest schema) ----
   // Change them from the panel's Settings section, or:
-  //   omarchy bar set blackcode.language <key> "<value>"
+  //   omarchy bar set blackcode.omalangy <key> "<value>"
   readonly property string labelStyle: {
     const v = setting("label", "")
     if (v) return String(v)
@@ -51,6 +51,7 @@ Panel {
   property int activeIndex: 0
   property string activeKeymap: ""
   property string appliedArgs: ""
+  property bool moduleCurrent: true
   property var nextKeyStatus: ({ combo: "", status: "off", conflict: "" })
   property var panelKeyStatus: ({ combo: "", status: "off", conflict: "" })
   property string errorText: ""
@@ -155,7 +156,8 @@ Panel {
   function syncSettings() {
     if (!root.stateLoaded || applyProc.running || root.active.length === 0) return
     if (!root.managed && !root.settingsTouched) return
-    if (argsFor(root.active).join("|") !== root.appliedArgs) applyEntries(root.active)
+    // An older plugin version wrote the module: rewrite it in the current shape.
+    if (argsFor(root.active).join("|") !== root.appliedArgs || (root.managed && !root.moduleCurrent)) applyEntries(root.active)
   }
 
   function settingChanged() {
@@ -270,6 +272,7 @@ Panel {
         root.activeIndex = s.active || 0
         root.activeKeymap = s.activeKeymap || ""
         root.appliedArgs = s.applied || ""
+        root.moduleCurrent = s.current !== false
         root.nextKeyStatus = s.nextKey || root.nextKeyStatus
         root.panelKeyStatus = s.panelKey || root.panelKeyStatus
         root.stateLoaded = true
@@ -409,7 +412,7 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            text: "Keyboard languages"
+            text: "OmaLangy"
             color: root.fg
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
@@ -627,7 +630,7 @@ Panel {
           { title: "Switch to next language", key: "nextLanguageKey", value: root.nextLanguageKey, status: root.nextKeyStatus, fallback: "SUPER + SHIFT + K",
             command: "hyprctl switchxkblayout all next" },
           { title: "Open keyboard languages panel", key: "panelKey", value: root.panelKey, status: root.panelKeyStatus, fallback: "SUPER + CTRL + ALT + K",
-            command: "omarchy-shell blackcode.language toggle" }
+            command: "omarchy-shell blackcode.omalangy toggle" }
         ]
 
         Item {

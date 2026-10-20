@@ -1,6 +1,6 @@
-# Keyboard Languages for Omarchy
+# OmaLangy: keyboard languages for Omarchy
 
-![The keyboard languages panel open from the bar](preview.png)
+![OmaLangy panel open from the bar](preview.png)
 
 A keyboard-language switcher for the Omarchy bar. It shows a small keyboard
 icon and the current language code (`󰌌 EN`, `󰌌 AR`, ...). Click it to open a
@@ -56,12 +56,12 @@ Position is the widget's place in the bar layout, so the panel moves it with
 `omarchy bar move` (the same as running it yourself):
 
 ```bash
-omarchy bar move blackcode.language --section right --index 0
-omarchy bar move blackcode.language --after omarchy.clock
-omarchy bar set blackcode.language label "Code only"
-omarchy bar set blackcode.language switchKeys "Menu key"
-omarchy bar set blackcode.language nextLanguageKey "SUPER + ALT + L"
-omarchy bar set blackcode.language panelKey ""
+omarchy bar move blackcode.omalangy --section right --index 0
+omarchy bar move blackcode.omalangy --after omarchy.clock
+omarchy bar set blackcode.omalangy label "Code only"
+omarchy bar set blackcode.omalangy switchKeys "Menu key"
+omarchy bar set blackcode.omalangy nextLanguageKey "SUPER + ALT + L"
+omarchy bar set blackcode.omalangy panelKey ""
 ```
 
 ## Safe by design
@@ -97,9 +97,9 @@ omarchy plugin add https://github.com/alshareedah22/omarchy-language-plugin.git 
 Or from a local copy:
 
 ```bash
-mkdir -p ~/.config/omarchy/plugins/blackcode.language
-cp manifest.json Panel.qml LanguageModel.js languagectl LICENSE ~/.config/omarchy/plugins/blackcode.language/
-omarchy plugin enable blackcode.language --section center
+mkdir -p ~/.config/omarchy/plugins/blackcode.omalangy
+cp manifest.json Panel.qml LanguageModel.js languagectl LICENSE ~/.config/omarchy/plugins/blackcode.omalangy/
+omarchy plugin enable blackcode.omalangy --section center
 ```
 
 Omarchy also ships a small built-in layout label (`omarchy.keyboard-layout`).
@@ -113,8 +113,8 @@ omarchy bar put omarchy.keyboard-layout --after omarchy.clock
 ## Remove
 
 ```bash
-~/.config/omarchy/plugins/blackcode.language/languagectl uninstall
-omarchy plugin remove blackcode.language
+~/.config/omarchy/plugins/blackcode.omalangy/languagectl uninstall
+omarchy plugin remove blackcode.omalangy
 ```
 
 `languagectl uninstall` deletes `keyboard-languages.lua` and the line in

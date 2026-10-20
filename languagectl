@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Backend for the blackcode.language bar widget.
+# Backend for the OmaLangy bar widget (blackcode.omalangy).
 #
 # Keyboard languages and the plugin's keybindings are written to their own
 # Hyprland module, ~/.config/hypr/keyboard-languages.lua, which hyprland.lua
@@ -23,9 +23,12 @@ HYPR_DIR="$HOME/.config/hypr"
 MODULE_NAME="keyboard-languages"
 MODULE_FILE="$HYPR_DIR/$MODULE_NAME.lua"
 HYPRLAND_FILE="$HYPR_DIR/hyprland.lua"
-HOOK_MARKER="-- Keyboard languages from the bar (blackcode.language plugin)."
+HOOK_MARKER="-- Keyboard languages from the bar (OmaLangy plugin)."
+OLD_HOOK_MARKER="-- Keyboard languages from the bar (blackcode.language plugin)."
+# Bump when the generated module changes shape, so existing installs rewrite it.
+MODULE_FORMAT=2
 HOOK_LINE="pcall(require, \"hypr.$MODULE_NAME\")"
-LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/blackcode-language.lock"
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/omalangy.lock"
 
 NEXT_DESC="Next keyboard language"
 PANEL_DESC="Keyboard languages"
@@ -86,6 +89,11 @@ bound_elsewhere() {
         | (if (.description // "") != "" then .description else "\(.dispatcher) \(.arg)" end)' | head -1
 }
 
+# The module was written by this version of the plugin.
+module_current() {
+  [[ -f $MODULE_FILE ]] && grep -qxF -e "-- format: $MODULE_FORMAT" "$MODULE_FILE"
+}
+
 saved_args() {
   [[ -f $MODULE_FILE ]] || return 0
   sed -n 's/^-- args: //p' "$MODULE_FILE" | head -1
@@ -123,7 +131,8 @@ state() {
     --argjson devices "$devices" \
     --argjson nextKey "$(key_status "$next_key" "$NEXT_DESC")" \
     --argjson panelKey "$(key_status "$panel_key" "$PANEL_DESC")" \
-    --arg applied "$args" '
+    --arg applied "$args" \
+    --argjson current "$(module_current && echo true || echo false)" '
     ($devices | [.keyboards[] | select(.name | test("^(hl-virtual-keyboard|power-button|sleep-button|lid-switch|video-bus)") | not)]) as $kbs
     | (($kbs | map(select(.main)) | first) // ($kbs | max_by(.active_layout_index // 0)) // {}) as $kb
     | {
@@ -133,6 +142,7 @@ state() {
         active: ($kb.active_layout_index // 0),
         activeKeymap: ($kb.active_keymap // ""),
         applied: $applied,
+        current: $current,
         nextKey: $nextKey,
         panelKey: $panelKey
       }'
@@ -194,7 +204,7 @@ apply() {
     if [[ -n $other ]]; then
       warnings+=("$panel_key is already \"$other\"; panel shortcut left off")
     else
-      binds+="  o.bind($(lua_str "$panel_key"), $(lua_str "$PANEL_DESC"), \"omarchy-shell -q blackcode.language toggle\")"$'\n'
+      binds+="  o.bind($(lua_str "$panel_key"), $(lua_str "$PANEL_DESC"), \"omarchy-shell -q blackcode.omalangy toggle\")"$'\n'
     fi
   fi
 
@@ -204,7 +214,8 @@ apply() {
   local tmp
   tmp=$(mktemp "$HYPR_DIR/.$MODULE_NAME.XXXXXX")
   {
-    echo "-- Managed by the blackcode.language Omarchy bar plugin."
+    echo "-- Managed by the OmaLangy Omarchy bar plugin (blackcode.omalangy)."
+    echo "-- format: $MODULE_FORMAT"
     echo "-- Change languages and shortcuts from the keyboard icon on the bar; edits here are overwritten."
     echo "-- args: $layouts|$variants|$switch_keys|$next_key|$panel_key"
     echo "$config"
@@ -252,7 +263,7 @@ check() {
   local out
   out=$(apply "$l" "$v" "$s" "$n" "$p" 2>&1 || true)
   if [[ -n $out ]]; then
-    command -v notify-send >/dev/null && notify-send -a "Keyboard languages" "Shortcut turned off" "$out" || true
+    command -v notify-send >/dev/null && notify-send -a "OmaLangy" "Shortcut turned off" "$out" || true
     echo "$out" >&2
   fi
 }
@@ -266,7 +277,7 @@ switch_layout() {
 uninstall() {
   if [[ -f $HYPRLAND_FILE ]] && grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE"; then
     cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
-    grep -vxF -e "$HOOK_LINE" -e "$HOOK_MARKER" "$HYPRLAND_FILE" >"$HYPRLAND_FILE.tmp"
+    grep -vxF -e "$HOOK_LINE" -e "$HOOK_MARKER" -e "$OLD_HOOK_MARKER" "$HYPRLAND_FILE" >"$HYPRLAND_FILE.tmp"
     # Drop the blank line the hook was appended after, if it is now trailing.
     sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$HYPRLAND_FILE.tmp"
     mv "$HYPRLAND_FILE.tmp" "$HYPRLAND_FILE"
