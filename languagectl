@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# Backend for the blackcode.language bar widget.
+#
+# Keyboard languages are written to their own Hyprland module,
+# ~/.config/hypr/keyboard-languages.lua, which hyprland.lua loads last through
+# a pcall'd require. Nothing else in the user's config is rewritten, and a
+# missing or broken module can never stop Hyprland from loading.
+#
+#   languagectl state                          JSON: layouts, variants, options, active index
+#   languagectl apply <layouts> <variants> <toggle>
+#                                              e.g. apply "us,ara" "," grp:alts_toggle
+#   languagectl switch <index|next|prev>       switch every keyboard to that layout
+#   languagectl uninstall                      remove the module and the hook line
+
+set -euo pipefail
+
+HYPR_DIR="$HOME/.config/hypr"
+MODULE_NAME="keyboard-languages"
+MODULE_FILE="$HYPR_DIR/$MODULE_NAME.lua"
+HYPRLAND_FILE="$HYPR_DIR/hyprland.lua"
+HOOK_MARKER="-- Keyboard languages from the bar (blackcode.language plugin)."
+HOOK_LINE="pcall(require, \"hypr.$MODULE_NAME\")"
+
+fail() {
+  echo "languagectl: $*" >&2
+  exit 1
+}
+
+option_str() {
+  hyprctl -j getoption "$1" 2>/dev/null | jq -r '.str // ""'
+}
+
+# Same keyboards the built-in widget ignores: buttons and the fcitx5 virtual
+# keyboard carry a layout list without anyone typing on them.
+typed_keyboards='[.keyboards[] | select(.name | test("^(hl-virtual-keyboard|power-button|sleep-button|lid-switch|video-bus)") | not)]'
+
+state() {
+  local devices
+  devices=$(hyprctl -j devices 2>/dev/null || echo '{"keyboards":[]}')
+
+  jq -cn \
+    --arg layouts "$(option_str input:kb_layout)" \
+    --arg variants "$(option_str input:kb_variant)" \
+    --arg options "$(option_str input:kb_options)" \
+    --argjson devices "$devices" \
+    --arg managed "$([[ -f $MODULE_FILE ]] && echo 1 || echo 0)" '
+    ($devices | '"$typed_keyboards"') as $kbs
+    | (($kbs | map(select(.main)) | first) // ($kbs | max_by(.active_layout_index // 0)) // {}) as $kb
+    | {
+        layouts: ($layouts | split(",")),
+        variants: ($variants | split(",")),
+        options: $options,
+        active: ($kb.active_layout_index // 0),
+        activeKeymap: ($kb.active_keymap // ""),
+        managed: ($managed == "1")
+      }'
+}
+
+valid_list() {
+  [[ $1 =~ ^[A-Za-z0-9_,-]*$ ]]
+}
+
+ensure_hook() {
+  [[ -f $HYPRLAND_FILE ]] || fail "$HYPRLAND_FILE not found"
+  grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE" && return 0
+
+  cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
+  printf '\n%s\n%s\n' "$HOOK_MARKER" "$HOOK_LINE" >>"$HYPRLAND_FILE"
+}
+
+apply() {
+  local layouts="${1:-}" variants="${2:-}" toggle="${3:-grp:alts_toggle}"
+
+  [[ -n $layouts ]] || fail "no layouts given"
+  valid_list "$layouts" || fail "invalid layouts: $layouts"
+  valid_list "$variants" || fail "invalid variants: $variants"
+  [[ $toggle =~ ^(none|grp:[a-z_]+)$ ]] || fail "invalid toggle: $toggle"
+
+  # Keep every option the user already has (compose key, caps lock, ...) and
+  # replace only the layout-switch shortcut.
+  local base options
+  base=$(option_str input:kb_options | tr ',' '\n' | grep -v '^grp:' | grep -v '^$' | paste -sd, || true)
+  options="$base"
+  if [[ $toggle != none && $layouts == *,* ]]; then
+    options="${options:+$options,}$toggle"
+  fi
+  [[ $options =~ ^[A-Za-z0-9_:,()+-]*$ ]] || fail "unexpected kb_options: $options"
+
+  local config="hl.config({ input = { kb_layout = \"$layouts\", kb_variant = \"$variants\", kb_options = \"$options\" } })"
+
+  mkdir -p "$HYPR_DIR"
+  local tmp
+  tmp=$(mktemp "$HYPR_DIR/.$MODULE_NAME.XXXXXX")
+  cat >"$tmp" <<EOF
+-- Managed by the blackcode.language Omarchy bar plugin.
+-- Change languages from the keyboard icon on the bar; edits here are overwritten.
+-- Remove with: languagectl uninstall (in the plugin folder).
+$config
+EOF
+  mv "$tmp" "$MODULE_FILE"
+  ensure_hook
+
+  # Apply right away rather than waiting on Hyprland's file watcher.
+  hyprctl eval "$config" >/dev/null
+}
+
+switch_layout() {
+  local target="${1:-next}"
+  [[ $target =~ ^([0-9]+|next|prev)$ ]] || fail "invalid layout: $target"
+  hyprctl switchxkblayout all "$target" >/dev/null
+}
+
+uninstall() {
+  if [[ -f $HYPRLAND_FILE ]] && grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE"; then
+    cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
+    grep -vxF -e "$HOOK_LINE" -e "$HOOK_MARKER" "$HYPRLAND_FILE" >"$HYPRLAND_FILE.tmp"
+    # Drop the blank line the hook was appended after, if it is now trailing.
+    sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$HYPRLAND_FILE.tmp"
+    mv "$HYPRLAND_FILE.tmp" "$HYPRLAND_FILE"
+  fi
+  rm -f "$MODULE_FILE"
+  hyprctl reload >/dev/null || true
+  echo "Keyboard languages reset to your Hyprland config."
+}
+
+case "${1:-}" in
+state) state ;;
+apply) shift; apply "$@" ;;
+switch) shift; switch_layout "$@" ;;
+uninstall) uninstall ;;
+*)
+  echo "Usage: languagectl state | apply <layouts> <variants> <toggle> | switch <index|next|prev> | uninstall" >&2
+  exit 1
+  ;;
+esac
