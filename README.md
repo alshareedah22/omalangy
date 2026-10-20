@@ -44,12 +44,18 @@ Omarchy widget setting, and declared in `manifest.json` (`defaults` + `schema`).
 
 | Setting           | Values                                              | Default |
 |-------------------|-----------------------------------------------------|---------|
+| Position          | Left, Center, Right · Start, Next to clock, End     | Center, next to clock |
 | `label`           | `Icon and code`, `Code only`, `Icon only`           | `Icon and code` |
 | `switchKeys`      | `Both Alt keys`, `Menu key`, `Right Ctrl`, `Off`    | `Both Alt keys` |
 | `nextLanguageKey` | any Hyprland combo, or empty to turn off            | `SUPER + SHIFT + K` |
 | `panelKey`        | any Hyprland combo, or empty to turn off            | `SUPER + CTRL + ALT + K` |
 
+Position is the widget's place in the bar layout, so the panel moves it with
+`omarchy bar move` (the same as running it yourself):
+
 ```bash
+omarchy bar move blackcode.language --section right --index 0
+omarchy bar move blackcode.language --after omarchy.clock
 omarchy bar set blackcode.language label "Code only"
 omarchy bar set blackcode.language switchKeys "Menu key"
 omarchy bar set blackcode.language nextLanguageKey "SUPER + ALT + L"

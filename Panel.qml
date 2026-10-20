@@ -60,6 +60,51 @@ Panel {
   readonly property var current: active.length > activeIndex ? active[activeIndex] : null
   readonly property string currentCode: current ? current.code : ""
 
+  // ---- Position on the bar (read from shell.json, changed with `omarchy bar move`) ----
+  property var barLayout: ({})
+
+  function entryId(entry) {
+    return typeof entry === "string" ? entry : (entry && entry.id ? String(entry.id) : "")
+  }
+
+  readonly property var placement: {
+    const sections = ["left", "center", "right"]
+    for (let i = 0; i < sections.length; i++) {
+      const ids = (root.barLayout[sections[i]] || []).map(root.entryId)
+      const at = ids.indexOf(root.moduleName)
+      if (at !== -1) return { section: sections[i], index: at, ids: ids }
+    }
+    return { section: "", index: -1, ids: [] }
+  }
+  readonly property bool clockInSection: placement.ids.indexOf("omarchy.clock") !== -1
+  readonly property string order: {
+    const p = placement
+    if (p.index === -1) return ""
+    if (p.index > 0 && p.ids[p.index - 1] === "omarchy.clock") return "Next to clock"
+    if (p.index === 0) return "Start"
+    if (p.index === p.ids.length - 1) return "End"
+    return ""
+  }
+
+  function moveTo(section, where) {
+    if (!root.bar) return
+    const others = (root.barLayout[section] || []).map(root.entryId).filter(function(id) { return id !== root.moduleName })
+    let place = "--section " + section + " --index " + (where === "Start" ? 0 : others.length)
+    if (where === "Next to clock" && others.indexOf("omarchy.clock") !== -1) place = "--after omarchy.clock"
+    root.close()
+    root.bar.run("omarchy bar move " + root.moduleName + " " + place)
+  }
+
+  FileView {
+    id: shellConfig
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: {
+      try { root.barLayout = (JSON.parse(text()).bar || {}).layout || {} } catch (e) {}
+    }
+  }
+
   // ---- Search ----
   property string query: ""
   property int resultIndex: 0
@@ -311,8 +356,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: searchField
-    contentWidth: panel.fittedContentWidth(Style.space(390))
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(860))
+    contentWidth: panel.fittedContentWidth(Style.space(460))
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(1100))
 
     Column {
       id: panelColumn
@@ -488,6 +533,35 @@ Panel {
         fontFamily: root.fontFamily
       }
 
+      SettingLabel { text: "Position on top bar" }
+      Flow {
+        width: parent.width
+        spacing: Style.space(6)
+        Repeater {
+          model: [{ label: "Left", value: "left" }, { label: "Center", value: "center" }, { label: "Right", value: "right" }]
+          Chip {
+            required property var modelData
+            label: modelData.label
+            selected: root.placement.section === modelData.value
+            onPicked: root.moveTo(modelData.value, modelData.value === "center" ? "Next to clock" : "End")
+          }
+        }
+      }
+      Flow {
+        width: parent.width
+        spacing: Style.space(6)
+        visible: root.placement.section !== ""
+        Repeater {
+          model: root.clockInSection ? ["Start", "Next to clock", "End"] : ["Start", "End"]
+          Chip {
+            required property var modelData
+            label: modelData
+            selected: root.order === modelData
+            onPicked: root.moveTo(root.placement.section, modelData)
+          }
+        }
+      }
+
       SettingLabel { text: "Switch keys" }
       Flow {
         width: parent.width
@@ -521,8 +595,10 @@ Panel {
       SettingLabel { text: "Keybindings" }
       Repeater {
         model: [
-          { title: "Next language", key: "nextLanguageKey", value: root.nextLanguageKey, status: root.nextKeyStatus, fallback: "SUPER + SHIFT + K" },
-          { title: "Open this panel", key: "panelKey", value: root.panelKey, status: root.panelKeyStatus, fallback: "SUPER + CTRL + ALT + K" }
+          { title: "Switch to next language", key: "nextLanguageKey", value: root.nextLanguageKey, status: root.nextKeyStatus, fallback: "SUPER + SHIFT + K",
+            command: "hyprctl switchxkblayout all next" },
+          { title: "Open keyboard languages panel", key: "panelKey", value: root.panelKey, status: root.panelKeyStatus, fallback: "SUPER + CTRL + ALT + K",
+            command: "omarchy-shell blackcode.language toggle" }
         ]
 
         Item {
@@ -532,19 +608,19 @@ Panel {
           readonly property bool conflict: modelData.status && modelData.status.status === "conflict"
 
           width: parent.width
-          implicitHeight: keyColumn.implicitHeight
+          implicitHeight: keyColumn.implicitHeight + Style.space(6)
 
           Column {
             id: keyColumn
             anchors.left: parent.left
             anchors.right: keyToggle.left
             anchors.rightMargin: Style.space(8)
-            spacing: Style.space(2)
+            spacing: Style.space(3)
 
             Text {
               textFormat: Text.PlainText
               width: parent.width
-              elide: Text.ElideRight
+              wrapMode: Text.Wrap
               text: keyRow.modelData.title
               color: keyRow.conflict ? Color.urgent : root.fg
               font.family: root.fontFamily
@@ -554,7 +630,7 @@ Panel {
             Text {
               textFormat: Text.PlainText
               width: parent.width
-              elide: Text.ElideRight
+              wrapMode: Text.Wrap
               text: keyRow.enabledKey ? keyRow.modelData.value.toUpperCase() : "Off"
               color: keyRow.conflict ? Color.urgent : Qt.darker(root.fg, 1.3)
               font.family: root.fontFamily
@@ -569,6 +645,16 @@ Panel {
               wrapMode: Text.Wrap
               text: "Used by Omarchy: \"" + (keyRow.modelData.status ? keyRow.modelData.status.conflict : "") + "\" · left off"
               color: Color.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              wrapMode: Text.WrapAnywhere
+              text: "Runs: " + keyRow.modelData.command
+              color: Qt.darker(root.fg, 1.6)
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
@@ -588,8 +674,8 @@ Panel {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        wrapMode: Text.Wrap
-        text: "Other keys: omarchy bar set " + root.moduleName + " nextLanguageKey \"SUPER + ALT + L\""
+        wrapMode: Text.WrapAnywhere
+        text: "Change a key:\n  omarchy bar set " + root.moduleName + " nextLanguageKey \"SUPER + ALT + L\"\n  omarchy bar set " + root.moduleName + " panelKey \"SUPER + CTRL + ALT + J\""
         color: Qt.darker(root.fg, 1.6)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -637,7 +723,7 @@ Panel {
       ListView {
         id: resultList
         width: parent.width
-        height: Style.space(180)
+        height: Style.space(150)
         clip: true
         model: root.results
         boundsBehavior: Flickable.StopAtBounds
