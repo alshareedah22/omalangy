@@ -1,6 +1,6 @@
 # OmaLangy: keyboard languages for Omarchy
 
-![OmaLangy panel open from the bar](preview.png)
+![OmaLangy: keyboard languages in the Omarchy bar](preview.png)
 
 A keyboard-language switcher for the Omarchy bar. It shows a small keyboard
 icon and the current language code (`󰌌 EN`, `󰌌 AR`, ...). Click it to open a
