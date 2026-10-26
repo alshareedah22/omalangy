@@ -358,8 +358,10 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.currentCode === "" || root.labelStyle === "Icon only" ? "󰌌"
-      : (root.labelStyle === "Code only" ? root.currentCode : "󰌌 " + root.currentCode)
+    // The label is drawn by barIcon below: a color keyboard icon plus the language code.
+    text: "󰌌"
+    labelVisible: false
+    fixedWidth: vertical ? -1 : barIcon.implicitWidth + Style.spaceReal(6) * 2
     fontSize: Style.font.caption
     horizontalMargin: 6
     tooltipText: (root.activeKeymap || "Keyboard language") + (root.active.length > 1 ? "\nRight-click or scroll to switch" : "")
@@ -368,6 +370,30 @@ Panel {
       else root.toggle()
     }
     onWheelMoved: function(delta) { root.switchTo(delta < 0 ? "next" : "prev") }
+    Row {
+      id: barIcon
+      anchors.centerIn: parent
+      spacing: Math.round(Style.font.caption * 0.3)
+      Image {
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.currentCode === "" || root.labelStyle !== "Code only"
+        source: Qt.resolvedUrl("icon.svg")
+        width: Math.round(Style.font.caption * 1.35)
+        height: width
+        sourceSize: Qt.size(width * 2, height * 2)
+        smooth: true
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.currentCode !== "" && root.labelStyle !== "Icon only"
+        textFormat: Text.PlainText
+        text: root.currentCode
+        color: button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: Style.font.caption
+        renderType: Text.NativeRendering
+      }
+    }
   }
 
   // ---- Popup ----
@@ -391,15 +417,15 @@ Panel {
         width: parent.width
         implicitHeight: Math.max(heroIcon.implicitHeight, heroLabels.implicitHeight)
 
-        Text {
+        Image {
           id: heroIcon
-          textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "󰌌"
-          color: root.fg
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.display
+          source: Qt.resolvedUrl("icon.svg")
+          width: Math.round(Style.font.display * 1.25)
+          height: width
+          sourceSize: Qt.size(width * 2, height * 2)
+          smooth: true
         }
 
         Column {

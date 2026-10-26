@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- OmaLangy: a keyboard with a speech bubble — the language you type in. -->
+  <defs>
+    <linearGradient id="body" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0ea5e9"/>
+      <stop offset="0.5" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <linearGradient id="bubble" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <!-- keyboard -->
+  <rect x="3" y="25.5" width="50" height="32" rx="6" fill="#0f172a" opacity="0.35" transform="translate(1.5 1.5)"/>
+  <rect x="3" y="25.5" width="50" height="32" rx="6" fill="url(#body)"/>
+  <g fill="#f0f9ff">
+    <rect x="8" y="31" width="6" height="5" rx="1.2"/>
+    <rect x="16.5" y="31" width="6" height="5" rx="1.2"/>
+    <rect x="25" y="31" width="6" height="5" rx="1.2"/>
+    <rect x="33.5" y="31" width="6" height="5" rx="1.2"/>
+    <rect x="42" y="31" width="6" height="5" rx="1.2"/>
+    <rect x="10.5" y="39" width="6" height="5" rx="1.2"/>
+    <rect x="19" y="39" width="6" height="5" rx="1.2"/>
+    <rect x="27.5" y="39" width="6" height="5" rx="1.2"/>
+    <rect x="36" y="39" width="6" height="5" rx="1.2"/>
+    <rect x="15" y="47" width="26" height="5" rx="1.2"/>
+  </g>
+  <!-- speech bubble -->
+  <path d="M38 4 h20 a5 5 0 0 1 5 5 v11 a5 5 0 0 1 -5 5 h-9 l-6 5 v-5 h-5 a5 5 0 0 1 -5 -5 v-11 a5 5 0 0 1 5 -5 z" fill="#0f172a" opacity="0.3" transform="translate(1 1)"/>
+  <path d="M38 4 h20 a5 5 0 0 1 5 5 v11 a5 5 0 0 1 -5 5 h-9 l-6 5 v-5 h-5 a5 5 0 0 1 -5 -5 v-11 a5 5 0 0 1 5 -5 z" fill="url(#bubble)"/>
+  <!-- an "A" and a wave of script -->
+  <path d="M38 20 l4 -11 l4 11 M39.5 16 h5" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M49 17 q2 -4 4 0 t4 0" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="53" cy="11.5" r="1.4" fill="#ffffff"/>
+</svg>

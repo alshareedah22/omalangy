@@ -98,7 +98,7 @@ Or from a local copy:
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/blackcode.omalangy
-cp manifest.json Panel.qml LanguageModel.js languagectl LICENSE ~/.config/omarchy/plugins/blackcode.omalangy/
+cp manifest.json Panel.qml LanguageModel.js languagectl icon.svg LICENSE ~/.config/omarchy/plugins/blackcode.omalangy/
 omarchy plugin enable blackcode.omalangy --section center
 ```
 

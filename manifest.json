@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "blackcode.omalangy",
   "name": "OmaLangy",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "author": "BlackCode",
   "license": "MIT",
   "description": "OmaLangy: keyboard languages for the Omarchy bar. English, Arabic and every xkb layout, switched with a click or an Omarchy-safe shortcut",
