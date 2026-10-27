@@ -117,14 +117,41 @@ omarchy bar put omarchy.keyboard-layout --after omarchy.clock
 
 ## Remove
 
+Run the uninstall **first**, while the plugin is still installed:
+
 ```bash
 ~/.config/omarchy/plugins/blackcode.omalangy/languagectl uninstall
 omarchy plugin remove blackcode.omalangy
 ```
 
-`languagectl uninstall` deletes `keyboard-languages.lua` and the hook line in
-`hyprland.lua` (a `hyprland.lua.bak.<time>` backup is left next to it), then
-reloads Hyprland so your own `input.lua` settings apply again.
+`languagectl uninstall` deletes `~/.config/hypr/keyboard-languages.lua` (your
+languages and the plugin's keybindings), removes the hook line and its comment
+from `~/.config/hypr/hyprland.lua` (a `hyprland.lua.bak.<time>` backup is left
+next to it), then runs `hyprctl reload` so your own `input.lua` settings apply
+again. Remove the plugin right after: if the bar widget is still running, a
+later settings change in its panel would set the module up again.
+
+### Already removed the plugin?
+
+Hyprland keeps loading normally: the hook runs through `pcall`, so a missing
+`keyboard-languages.lua` is ignored. Your keyboard layouts and the plugin's
+keybindings stay active until you clean up by hand:
+
+1. Delete `~/.config/hypr/keyboard-languages.lua`.
+2. In `~/.config/hypr/hyprland.lua`, delete these lines (the comment is
+   optional, the second line is the hook):
+
+   ```lua
+   -- Keyboard languages from the bar (OmaLangy plugin).
+   pcall(require, "hypr.keyboard-languages")
+   ```
+
+   An older version wrote `-- Keyboard languages from the bar (blackcode.language plugin).`
+   as the comment; delete that one too if you see it.
+3. Run `hyprctl reload`.
+
+The `hyprland.lua.bak.<time>` files the plugin created are only backups and are
+safe to delete.
 
 ## Command line
 

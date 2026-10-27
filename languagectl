@@ -28,7 +28,8 @@ OLD_HOOK_MARKER="-- Keyboard languages from the bar (blackcode.language plugin).
 # Bump when the generated module changes shape, so existing installs rewrite it.
 MODULE_FORMAT=2
 HOOK_LINE="pcall(require, \"hypr.$MODULE_NAME\")"
-LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/omalangy.lock"
+LOCK_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+LOCK_FILE="$LOCK_DIR/omalangy.lock"
 
 NEXT_DESC="Next keyboard language"
 PANEL_DESC="Keyboard languages"
@@ -276,11 +277,18 @@ switch_layout() {
 
 uninstall() {
   if [[ -f $HYPRLAND_FILE ]] && grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE"; then
+    local tmp
     cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
-    grep -vxF -e "$HOOK_LINE" -e "$HOOK_MARKER" -e "$OLD_HOOK_MARKER" "$HYPRLAND_FILE" >"$HYPRLAND_FILE.tmp"
-    # Drop the blank line the hook was appended after, if it is now trailing.
-    sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$HYPRLAND_FILE.tmp"
-    mv "$HYPRLAND_FILE.tmp" "$HYPRLAND_FILE"
+    tmp=$(mktemp "$HYPRLAND_FILE.XXXXXX")
+    # grep exits 1 when nothing is left; that is fine, so do not abort on it.
+    if ! { grep -vxF -e "$HOOK_LINE" -e "$HOOK_MARKER" -e "$OLD_HOOK_MARKER" "$HYPRLAND_FILE" >"$tmp" || true; } ||
+      # Drop the blank line the hook was appended after, if it is now trailing.
+      ! sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" ||
+      ! chmod --reference="$HYPRLAND_FILE" "$tmp" ||
+      ! mv "$tmp" "$HYPRLAND_FILE"; then
+      rm -f "$tmp"
+      fail "could not update $HYPRLAND_FILE (left unchanged)"
+    fi
   fi
   rm -f "$MODULE_FILE"
   hyprctl reload >/dev/null || true
@@ -292,6 +300,7 @@ state) state ;;
 switch) shift; switch_layout "$@" ;;
 apply | check | uninstall)
   # One writer at a time: the bar runs one widget per monitor.
+  mkdir -p "$LOCK_DIR"
   exec 9>"$LOCK_FILE"
   flock -w 10 9 || fail "another languagectl is still running"
   cmd="$1"; shift

@@ -271,6 +271,9 @@ Panel {
         root.variants = s.variants || []
         root.activeIndex = s.active || 0
         root.activeKeymap = s.activeKeymap || ""
+        // The module was removed (languagectl uninstall): forget earlier edits so
+        // the panel does not write it back on the next settings change.
+        if (root.appliedArgs !== "" && !s.applied) root.settingsTouched = false
         root.appliedArgs = s.applied || ""
         root.moduleCurrent = s.current !== false
         root.nextKeyStatus = s.nextKey || root.nextKeyStatus
