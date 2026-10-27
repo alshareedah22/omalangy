@@ -2,30 +2,31 @@
 
 ![OmaLangy: keyboard languages in the Omarchy bar](preview.png)
 
-A keyboard-language switcher for the Omarchy bar. It shows a small keyboard
-icon and the current language code (`󰌌 EN`, `󰌌 AR`, ...). Click it to open a
+A keyboard-language switcher for the Omarchy bar. It shows a small color
+keyboard icon and the current language code (`EN`, `AR`, ...). Click it to open a
 panel where you can:
 
 - **Switch** language by clicking it in the *Active* list
-- **Add** any of the ~750 xkb layouts and variants: English, Arabic, French,
-  Persian, Hebrew, Russian, Japanese and the rest. Search works in English or
-  in the language itself (`Arabic`, `عربي`, `Français`, `日本語`)
+- **Add** any xkb layout or variant that `xkbcli list --load-exotic` reports
+  (the panel shows the count): English, Arabic, French, Persian, Hebrew,
+  Russian, Japanese and the rest. Search works in English or in the language
+  itself (`Arabic`, `عربي`, `Français`, `日本語`)
 - **Remove** a language (󰅖) or **reorder** it (󰁝)
-- **Settings**: switch keys, bar label, and keybindings (see below)
+- **Settings**: bar position, switch keys, bar label, and keybindings (see below)
 
 On the bar itself: **left-click** opens the panel, **right-click** or
-**scroll** switches to the next language.
+**middle-click** switches to the next language, and **scroll** switches to the
+next (scroll down) or previous (scroll up) language.
 
 ## Keybindings
 
 | Keys                      | Action                         | Notes |
 |---------------------------|--------------------------------|-------|
-| Left Alt + Right Alt      | Next language                  | Omarchy's own default for extra layouts |
+| Left Alt + Right Alt      | Next language                  | xkb `grp:alts_toggle`, changeable, only set with two or more languages |
 | `SUPER + SHIFT + K`       | Next language                  | Hyprland binding, changeable |
 | `SUPER + CTRL + ALT + K`  | Open the languages panel       | Hyprland binding, changeable |
 
-All three were checked against every Omarchy binding. The plugin also guards
-against future clashes:
+The plugin guards against clashes with other bindings:
 
 - Before binding a key, it asks Hyprland whether anything else (Omarchy, your
   `bindings.lua`) already uses it. If so, it leaves its own shortcut off and
@@ -46,11 +47,11 @@ Omarchy widget setting, and declared in `manifest.json` (`defaults` + `schema`).
 
 | Setting           | Values                                              | Default |
 |-------------------|-----------------------------------------------------|---------|
-| Position          | Left, Center, Right · Start, Next to clock, End     | Center, next to clock |
+| Position          | Left, Center, Right · Start, Next to clock, End     | Right (`defaultSection` in the manifest) |
 | `label`           | `Icon and code`, `Code only`, `Icon only`           | `Icon and code` |
 | `switchKeys`      | `Both Alt keys`, `Menu key`, `Right Ctrl`, `Off`    | `Both Alt keys` |
-| `nextLanguageKey` | any Hyprland combo, or empty to turn off            | `SUPER + SHIFT + K` |
-| `panelKey`        | any Hyprland combo, or empty to turn off            | `SUPER + CTRL + ALT + K` |
+| `nextLanguageKey` | a Hyprland combo (letters, digits, `_`, `+`), or empty to turn off | `SUPER + SHIFT + K` |
+| `panelKey`        | a Hyprland combo (same rules), or empty to turn off | `SUPER + CTRL + ALT + K` |
 
 Position is the widget's place in the bar layout, so the panel moves it with
 `omarchy bar move` (the same as running it yourself):
@@ -78,6 +79,7 @@ omarchy bar set blackcode.omalangy panelKey ""
   a missing or broken file can never stop Hyprland from loading.
 - Your other keyboard options (Caps Lock compose key, both-Shifts Caps Lock, ...)
   are kept. Only the layout-switch shortcut (`grp:*`) is replaced.
+- Changes apply to all keyboards (`hyprctl switchxkblayout all`).
 - A Latin layout always stays first. Hyprland reads keybindings from the first
   layout, so this keeps `SUPER + ...` shortcuts working while you type Arabic.
 
@@ -85,6 +87,9 @@ omarchy bar set blackcode.omalangy panelKey ""
 
 - Omarchy 4 (the Quickshell-based `omarchy-shell` bar)
 - `hyprctl`, `jq` and `xkbcli`, which ship with Omarchy
+- `~/.config/hypr/hyprland.lua` must exist; `languagectl apply` stops with an
+  error if it is missing
+- `notify-send` is optional; it is used for the "Shortcut turned off" notice
 
 ## Install
 
@@ -99,7 +104,7 @@ Or from a local copy:
 ```bash
 mkdir -p ~/.config/omarchy/plugins/blackcode.omalangy
 cp manifest.json Panel.qml LanguageModel.js languagectl icon.svg LICENSE ~/.config/omarchy/plugins/blackcode.omalangy/
-omarchy plugin enable blackcode.omalangy --section center
+omarchy plugin enable blackcode.omalangy
 ```
 
 Omarchy also ships a small built-in layout label (`omarchy.keyboard-layout`).
@@ -117,14 +122,26 @@ omarchy bar put omarchy.keyboard-layout --after omarchy.clock
 omarchy plugin remove blackcode.omalangy
 ```
 
-`languagectl uninstall` deletes `keyboard-languages.lua` and the line in
-`hyprland.lua`, then reloads Hyprland so your own `input.lua` settings apply again.
+`languagectl uninstall` deletes `keyboard-languages.lua` and the hook line in
+`hyprland.lua` (a `hyprland.lua.bak.<time>` backup is left next to it), then
+reloads Hyprland so your own `input.lua` settings apply again.
 
 ## Command line
 
 ```bash
-languagectl state                       # JSON: layouts, variants, options, active
-languagectl apply "us,ara" "," grp:alts_toggle
+languagectl state                       # JSON: layouts, variants, options, active, keybinding status
+languagectl apply "us,ara" "," alts "SUPER + SHIFT + K" "SUPER + CTRL + ALT + K"
+                                        # layouts, variants, alts|menu|rctrl|off, next key, panel key
+languagectl check                       # drop shortcuts that something else now uses
 languagectl switch next                 # or prev, or a layout index
 languagectl uninstall
 ```
+
+## Limits
+
+- At least one language always stays; the last one cannot be removed.
+- A non-Latin layout cannot be moved to the top, and a Latin layout is moved
+  to the top if the list would start with a non-Latin one.
+- Alt+Shift and Ctrl+Shift are not offered as switch keys.
+- There are no automated tests. `LanguageModel.js` has no Qt dependency, so it
+  can be loaded with `node` for a manual check.
