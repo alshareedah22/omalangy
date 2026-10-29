@@ -207,7 +207,18 @@ Panel {
 
   Component.onCompleted: {
     ensureCatalog()
-    refresh()
+    setupProc.running = true
+  }
+
+  // Zero configuration: on the first start `languagectl setup` puts OmaLangy where the built-in
+  // keyboard label was and turns the default shortcuts on. Later starts do nothing (a marker),
+  // and every monitor's copy may run it: languagectl takes a lock.
+  Process {
+    id: setupProc
+    command: [root.ctl, "setup"]
+    stdout: StdioCollector { onStreamFinished: if (text.trim() !== "already set up") console.info("OmaLangy: " + text.trim()) }
+    stderr: StdioCollector { onStreamFinished: if (text.trim() !== "") console.warn("OmaLangy: " + text.trim()) }
+    onExited: root.refresh()
   }
 
   onSwitchValueChanged: settingChanged()

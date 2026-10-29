@@ -107,13 +107,17 @@ cp manifest.json Panel.qml LanguageModel.js languagectl icon.svg LICENSE ~/.conf
 omarchy plugin enable blackcode.omalangy
 ```
 
-Omarchy also ships a small built-in layout label (`omarchy.keyboard-layout`).
-This plugin replaces it, so you may want to take that one off the bar to
-avoid seeing the code twice. To put it back:
+That is all: nothing to configure. On its first start OmaLangy sets itself up:
 
-```bash
-omarchy bar put omarchy.keyboard-layout --after omarchy.clock
-```
+- It takes the place of Omarchy's built-in keyboard label (`omarchy.keyboard-layout`), in
+  the same spot on the bar, so the language code is not shown twice. The built-in entry is
+  kept in `~/.local/state/omalangy/` and `languagectl uninstall` puts it back.
+- SUPER+SHIFT+K (next language) and SUPER+CTRL+ALT+K (this panel) work right away, on the
+  languages Hyprland already has. A key Omarchy or your `bindings.lua` already uses is left
+  off. Your other keyboard options (compose key, Caps Lock) are kept.
+
+This runs once. Anything you change afterwards is never redone; `languagectl setup` is the
+command behind it.
 
 ## Remove
 
@@ -124,7 +128,8 @@ Run the uninstall **first**, while the plugin is still installed:
 omarchy plugin remove blackcode.omalangy
 ```
 
-`languagectl uninstall` deletes `~/.config/hypr/keyboard-languages.lua` (your
+`languagectl uninstall` puts Omarchy's keyboard label back on the bar if OmaLangy took its
+place, deletes `~/.config/hypr/keyboard-languages.lua` (your
 languages and the plugin's keybindings), removes the hook line and its comment
 from `~/.config/hypr/hyprland.lua` (a `hyprland.lua.bak.<time>` backup is left
 next to it), then runs `hyprctl reload` so your own `input.lua` settings apply
@@ -170,5 +175,11 @@ languagectl uninstall
 - A non-Latin layout cannot be moved to the top, and a Latin layout is moved
   to the top if the list would start with a non-Latin one.
 - Alt+Shift and Ctrl+Shift are not offered as switch keys.
-- There are no automated tests. `LanguageModel.js` has no Qt dependency, so it
-  can be loaded with `node` for a manual check.
+- `tests/test-setup.sh` covers the first-run setup and uninstall. `LanguageModel.js` has no
+  Qt dependency, so it can be loaded with `node` for a manual check.
+
+## Tests
+
+```bash
+tests/test-setup.sh     # first-run setup and uninstall, in a throwaway HOME
+```

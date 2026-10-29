@@ -15,6 +15,9 @@
 #   languagectl check
 #       drop any of our keybindings that something else has since claimed
 #   languagectl switch <index|next|prev>
+#   languagectl setup
+#       first run only (the widget runs it on start): take the built-in keyboard
+#       label's place on the bar, and turn the default shortcuts on
 #   languagectl uninstall
 
 set -euo pipefail
@@ -31,6 +34,11 @@ HOOK_LINE="pcall(require, \"hypr.$MODULE_NAME\")"
 LOCK_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}"
 LOCK_FILE="$LOCK_DIR/omalangy.lock"
 
+SHELL_JSON="${OMALANGY_SHELL_JSON:-$HOME/.config/omarchy/shell.json}"
+STATE_DIR="${OMALANGY_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/omalangy}"
+SETUP_MARKER="$STATE_DIR/setup-done"
+REPLACED_FILE="$STATE_DIR/replaced-keyboard-layout.json"
+MANIFEST="$(dirname "$(readlink -f "$0")")/manifest.json"
 NEXT_DESC="Next keyboard language"
 PANEL_DESC="Keyboard languages"
 
@@ -275,7 +283,90 @@ switch_layout() {
   hyprctl switchxkblayout all "$target" >/dev/null
 }
 
+# ---- Zero configuration (1.4) -------------------------------------------------------
+
+# Writes shell.json atomically, keeping its mode.
+write_shell_json() {
+  local tmp
+  tmp=$(mktemp "$SHELL_JSON.XXXXXX")
+  if ! { printf '%s\n' "$1" >"$tmp" && chmod --reference="$SHELL_JSON" "$tmp" && mv "$tmp" "$SHELL_JSON"; }; then
+    rm -f "$tmp"
+    fail "could not write $SHELL_JSON (left unchanged)"
+  fi
+}
+
+JQ_FIND='def find(id): first(["left", "center", "right"][] as $s | (.bar.layout[$s] // []) | to_entries[]
+  | select(.value.id == id) | {s: $s, i: .key}) // null;'
+
+# OmaLangy takes the built-in label's place: the same section and position. The built-in
+# entry (with any settings it had) is saved so uninstall can put it back.
+setup_bar() {
+  [[ -f $SHELL_JSON ]] || { echo "no $SHELL_JSON: bar left as it is"; return 0; }
+  local where next
+  where=$(jq -c "$JQ_FIND"' {kb: find("omarchy.keyboard-layout"), me: find("blackcode.omalangy")}' "$SHELL_JSON") ||
+    { echo "$SHELL_JSON is not valid JSON: bar left as it is"; return 0; }
+  if [[ $(jq -r '.kb == null' <<<"$where") == true ]]; then echo "the built-in keyboard label is not on the bar: nothing to replace"; return 0; fi
+  if [[ $(jq -r '.me == null' <<<"$where") == true ]]; then echo "OmaLangy is not on the bar yet: built-in label left in place"; return 0; fi
+  mkdir -p "$STATE_DIR"
+  jq -c "$JQ_FIND"' find("omarchy.keyboard-layout") as $kb | {section: $kb.s, index: $kb.i, entry: .bar.layout[$kb.s][$kb.i]}' \
+    "$SHELL_JSON" >"$REPLACED_FILE"
+  next=$(jq "$JQ_FIND"'
+    find("blackcode.omalangy") as $me | .bar.layout[$me.s][$me.i] as $entry
+    | .bar.layout[$me.s] |= del(.[$me.i])
+    | find("omarchy.keyboard-layout") as $kb
+    | .bar.layout[$kb.s][$kb.i] = $entry' "$SHELL_JSON")
+  write_shell_json "$next"
+  echo "OmaLangy now sits where the built-in keyboard label was ($(jq -r '.section' "$REPLACED_FILE"))"
+}
+
+# The default shortcuts and switch keys from the manifest, applied to the layouts Hyprland
+# already has. apply keeps every other keyboard option and skips keys that are taken.
+setup_keys() {
+  [[ -f $MODULE_FILE ]] && { echo "keyboard module already there: shortcuts left as they are"; return 0; }
+  local layouts variants switch next panel
+  layouts=$(option_str input:kb_layout)
+  variants=$(option_str input:kb_variant)
+  [[ -n $layouts ]] || layouts=us
+  switch=$(jq -r '.barWidget.defaults.switchKeys // "Both Alt keys"' "$MANIFEST")
+  case $switch in "Menu key") switch=menu ;; "Right Ctrl") switch=rctrl ;; Off) switch=off ;; *) switch=alts ;; esac
+  next=$(jq -r '.barWidget.defaults.nextLanguageKey // ""' "$MANIFEST")
+  panel=$(jq -r '.barWidget.defaults.panelKey // ""' "$MANIFEST")
+  apply "$layouts" "$variants" "$switch" "$next" "$panel"
+}
+
+setup() {
+  [[ -e $SETUP_MARKER ]] && { echo "already set up"; return 0; }
+  setup_bar
+  # its own process, so a failure (Hyprland not answering yet) cannot stop this one halfway;
+  # without the marker, the next start tries again (the bar step above is safe to repeat)
+  if ! "$0" setup-keys; then
+    echo "shortcuts not turned on yet; trying again on the next start" >&2
+    return 0
+  fi
+  mkdir -p "$STATE_DIR"
+  : >"$SETUP_MARKER"
+}
+
+# Puts the built-in keyboard label back where OmaLangy is (or where it was), if setup took
+# its place and it is not on the bar again already.
+restore_bar() {
+  [[ -f $REPLACED_FILE && -f $SHELL_JSON ]] || return 0
+  local next
+  next=$(jq --slurpfile saved "$REPLACED_FILE" "$JQ_FIND"'
+    $saved[0] as $r
+    | if find("omarchy.keyboard-layout") != null then .
+      else (find("blackcode.omalangy") // {s: $r.section, i: $r.index}) as $at
+        | .bar.layout[$at.s] = ((.bar.layout[$at.s] // []) | .[0:$at.i] + [$r.entry] + .[$at.i:])
+      end' "$SHELL_JSON") || return 0
+  write_shell_json "$next"
+  rm -f "$REPLACED_FILE"
+  echo "The built-in keyboard label is back on the bar."
+}
+
 uninstall() {
+  restore_bar
+  # a reinstall later sets itself up again
+  rm -f "$SETUP_MARKER"
   if [[ -f $HYPRLAND_FILE ]] && grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE"; then
     local tmp
     cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
@@ -298,7 +389,8 @@ uninstall() {
 case "${1:-}" in
 state) state ;;
 switch) shift; switch_layout "$@" ;;
-apply | check | uninstall)
+setup-keys) setup_keys ;;   # internal: run by setup, which holds the lock
+apply | check | uninstall | setup)
   # One writer at a time: the bar runs one widget per monitor.
   mkdir -p "$LOCK_DIR"
   exec 9>"$LOCK_FILE"
@@ -307,7 +399,7 @@ apply | check | uninstall)
   "$cmd" "$@"
   ;;
 *)
-  echo "Usage: languagectl state | apply <layouts> <variants> <alts|menu|rctrl|off> <next-key> <panel-key> | check | switch <index|next|prev> | uninstall" >&2
+  echo "Usage: languagectl state | apply <layouts> <variants> <alts|menu|rctrl|off> <next-key> <panel-key> | check | switch <index|next|prev> | setup | uninstall" >&2
   exit 1
   ;;
 esac
