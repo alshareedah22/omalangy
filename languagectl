@@ -165,12 +165,28 @@ lua_str() {
   printf '"%s"' "${1//\"/\\\"}"
 }
 
+# Matches only a live (uncommented) hook line.
+HOOK_RE='^[[:space:]]*pcall\(require, "hypr\.keyboard-languages"\)'
+
+# Keeps ONE backup of a file (the first state we ever touched); never overwrites it.
+backup_once() {
+  [[ -e $1.omalangy-backup ]] || cp -p "$1" "$1.omalangy-backup" 2>/dev/null || true
+}
+
 ensure_hook() {
   [[ -f $HYPRLAND_FILE ]] || fail "$HYPRLAND_FILE not found"
-  grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE" && return 0
+  grep -qE -e "$HOOK_RE" "$HYPRLAND_FILE" && return 0
 
-  cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
-  printf '\n%s\n%s\n' "$HOOK_MARKER" "$HOOK_LINE" >>"$HYPRLAND_FILE"
+  # Write through a symlink (stow, chezmoi), not over it.
+  local real tmp
+  real=$(readlink -f "$HYPRLAND_FILE")
+  backup_once "$real"
+  tmp=$(mktemp "$real.XXXXXX")
+  if ! { cat "$real" >"$tmp" && printf '\n%s\n%s\n' "$HOOK_MARKER" "$HOOK_LINE" >>"$tmp" &&
+    chmod --reference="$real" "$tmp" && mv "$tmp" "$real"; }; then
+    rm -f "$tmp"
+    fail "could not update $HYPRLAND_FILE (left unchanged)"
+  fi
 }
 
 apply() {
@@ -240,9 +256,12 @@ apply() {
   if [[ -f $MODULE_FILE ]] && cmp -s "$tmp" "$MODULE_FILE"; then
     rm -f "$tmp"
   else
+    chmod 0644 "$tmp"
     mv "$tmp" "$MODULE_FILE"
     ensure_hook
-    hyprctl reload config-only >/dev/null
+    if ! hyprctl reload config-only >/dev/null 2>&1; then
+      warnings+=("hyprctl reload failed: the change applies on the next Hyprland reload")
+    fi
   fi
 
   local w
@@ -285,38 +304,74 @@ switch_layout() {
 
 # ---- Zero configuration (1.4) -------------------------------------------------------
 
-# Writes shell.json atomically, keeping its mode.
-write_shell_json() {
-  local tmp
-  tmp=$(mktemp "$SHELL_JSON.XXXXXX")
-  if ! { printf '%s\n' "$1" >"$tmp" && chmod --reference="$SHELL_JSON" "$tmp" && mv "$tmp" "$SHELL_JSON"; }; then
-    rm -f "$tmp"
-    fail "could not write $SHELL_JSON (left unchanged)"
-  fi
+# Edits shell.json through <fn>, called as `fn <current json text>`. It sets NEW_JSON to the
+# new text (return 0), or returns non-zero to leave the file alone. The write goes to the
+# real file behind a symlink, keeps its mode, keeps one backup (shell.json.omalangy-backup)
+# and re-checks the file right before the swap, retrying once if something else changed it.
+NEW_JSON=""
+update_shell_json() {
+  local fn="$1" real snap tmp attempt rc
+  real=$(readlink -f "$SHELL_JSON")
+  for attempt in 1 2; do
+    snap=$(cat "$real") || fail "could not read $SHELL_JSON"
+    NEW_JSON=""
+    "$fn" "$snap" && rc=0 || rc=$?
+    ((rc == 0)) || return "$rc"
+    tmp=$(mktemp "$real.XXXXXX") || fail "could not write $SHELL_JSON (left unchanged)"
+    if ! { printf '%s\n' "$NEW_JSON" >"$tmp" && chmod --reference="$real" "$tmp"; }; then
+      rm -f "$tmp"
+      fail "could not write $SHELL_JSON (left unchanged)"
+    fi
+    if [[ $(cat "$real") != "$snap" ]]; then
+      rm -f "$tmp"
+      continue
+    fi
+    [[ -e $SHELL_JSON.omalangy-backup ]] || cp -p "$real" "$SHELL_JSON.omalangy-backup" 2>/dev/null || true
+    if ! mv "$tmp" "$real"; then
+      rm -f "$tmp"
+      fail "could not write $SHELL_JSON (left unchanged)"
+    fi
+    return 0
+  done
+  fail "$SHELL_JSON keeps changing; left unchanged"
 }
 
-JQ_FIND='def find(id): first(["left", "center", "right"][] as $s | (.bar.layout[$s] // []) | to_entries[]
-  | select(.value.id == id) | {s: $s, i: .key}) // null;'
+# Every section of the bar layout (Omarchy 4.5: left, centerBegin, center, centerEnd, right,
+# tray, plus whatever else the file has), and entries that are a bare string or an object.
+JQ_FIND='def eid: if type == "string" then . elif type == "object" then (.id // "") else "" end;
+def find(id): first(((["left", "centerBegin", "center", "centerEnd", "right", "tray"] + ((.bar.layout // {}) | keys_unsorted))[]) as $s
+  | select(((.bar.layout // {})[$s] | type) == "array") | .bar.layout[$s] | to_entries[]
+  | select(.value | eid == id) | {s: $s, i: .key}) // null;'
 
 # OmaLangy takes the built-in label's place: the same section and position. The built-in
 # entry (with any settings it had) is saved so uninstall can put it back.
-setup_bar() {
-  [[ -f $SHELL_JSON ]] || { echo "no $SHELL_JSON: bar left as it is"; return 0; }
-  local where next
-  where=$(jq -c "$JQ_FIND"' {kb: find("omarchy.keyboard-layout"), me: find("blackcode.omalangy")}' "$SHELL_JSON") ||
-    { echo "$SHELL_JSON is not valid JSON: bar left as it is"; return 0; }
-  if [[ $(jq -r '.kb == null' <<<"$where") == true ]]; then echo "the built-in keyboard label is not on the bar: nothing to replace"; return 0; fi
-  if [[ $(jq -r '.me == null' <<<"$where") == true ]]; then echo "OmaLangy is not on the bar yet: built-in label left in place"; return 0; fi
+setup_bar_edit() {
+  local where
+  where=$(jq -c "$JQ_FIND"' {kb: find("omarchy.keyboard-layout"), me: find("blackcode.omalangy")}' <<<"$1") ||
+    { echo "$SHELL_JSON is not valid JSON: bar left as it is"; return 2; }
+  if [[ $(jq -r '.kb == null' <<<"$where") == true ]]; then echo "the built-in keyboard label is not on the bar: nothing to replace"; return 2; fi
+  if [[ $(jq -r '.me == null' <<<"$where") == true ]]; then echo "OmaLangy is not on the bar yet: built-in label left in place"; return 2; fi
   mkdir -p "$STATE_DIR"
   jq -c "$JQ_FIND"' find("omarchy.keyboard-layout") as $kb | {section: $kb.s, index: $kb.i, entry: .bar.layout[$kb.s][$kb.i]}' \
-    "$SHELL_JSON" >"$REPLACED_FILE"
-  next=$(jq "$JQ_FIND"'
+    <<<"$1" >"$REPLACED_FILE"
+  NEW_JSON=$(jq "$JQ_FIND"'
     find("blackcode.omalangy") as $me | .bar.layout[$me.s][$me.i] as $entry
     | .bar.layout[$me.s] |= del(.[$me.i])
     | find("omarchy.keyboard-layout") as $kb
-    | .bar.layout[$kb.s][$kb.i] = $entry' "$SHELL_JSON")
-  write_shell_json "$next"
-  echo "OmaLangy now sits where the built-in keyboard label was ($(jq -r '.section' "$REPLACED_FILE"))"
+    | .bar.layout[$kb.s][$kb.i] = $entry' <<<"$1") || return 2
+}
+
+setup_bar() {
+  [[ -f $SHELL_JSON ]] || { echo "no $SHELL_JSON: bar left as it is"; return 0; }
+  local out rc
+  # messages from the edit go to stdout via a temp capture so update_shell_json can retry
+  out=$(update_shell_json setup_bar_edit) && rc=0 || rc=$?
+  if ((rc == 0)); then
+    echo "OmaLangy now sits where the built-in keyboard label was ($(jq -r '.section' "$REPLACED_FILE"))"
+  else
+    [[ -z $out ]] || echo "$out"
+    return 0
+  fi
 }
 
 # The default shortcuts and switch keys from the manifest, applied to the layouts Hyprland
@@ -349,16 +404,18 @@ setup() {
 
 # Puts the built-in keyboard label back where OmaLangy is (or where it was), if setup took
 # its place and it is not on the bar again already.
-restore_bar() {
-  [[ -f $REPLACED_FILE && -f $SHELL_JSON ]] || return 0
-  local next
-  next=$(jq --slurpfile saved "$REPLACED_FILE" "$JQ_FIND"'
+restore_bar_edit() {
+  NEW_JSON=$(jq --slurpfile saved "$REPLACED_FILE" "$JQ_FIND"'
     $saved[0] as $r
     | if find("omarchy.keyboard-layout") != null then .
       else (find("blackcode.omalangy") // {s: $r.section, i: $r.index}) as $at
         | .bar.layout[$at.s] = ((.bar.layout[$at.s] // []) | .[0:$at.i] + [$r.entry] + .[$at.i:])
-      end' "$SHELL_JSON") || return 0
-  write_shell_json "$next"
+      end' <<<"$1") || return 2
+}
+
+restore_bar() {
+  [[ -f $REPLACED_FILE && -f $SHELL_JSON ]] || return 0
+  update_shell_json restore_bar_edit || return 0
   rm -f "$REPLACED_FILE"
   echo "The built-in keyboard label is back on the bar."
 }
@@ -367,22 +424,23 @@ uninstall() {
   restore_bar
   # a reinstall later sets itself up again
   rm -f "$SETUP_MARKER"
-  if [[ -f $HYPRLAND_FILE ]] && grep -qF -e "$HOOK_LINE" "$HYPRLAND_FILE"; then
-    local tmp
-    cp "$HYPRLAND_FILE" "$HYPRLAND_FILE.bak.$(date +%s)"
-    tmp=$(mktemp "$HYPRLAND_FILE.XXXXXX")
+  if [[ -f $HYPRLAND_FILE ]] && grep -qE -e "$HOOK_RE" "$HYPRLAND_FILE"; then
+    local tmp real
+    real=$(readlink -f "$HYPRLAND_FILE")
+    backup_once "$real"
+    tmp=$(mktemp "$real.XXXXXX")
     # grep exits 1 when nothing is left; that is fine, so do not abort on it.
-    if ! { grep -vxF -e "$HOOK_LINE" -e "$HOOK_MARKER" -e "$OLD_HOOK_MARKER" "$HYPRLAND_FILE" >"$tmp" || true; } ||
+    if ! { { grep -vE -e "${HOOK_RE}[[:space:]]*\$" "$real" | grep -vxF -e "$HOOK_MARKER" -e "$OLD_HOOK_MARKER" >"$tmp"; } || true; } ||
       # Drop the blank line the hook was appended after, if it is now trailing.
       ! sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" ||
-      ! chmod --reference="$HYPRLAND_FILE" "$tmp" ||
-      ! mv "$tmp" "$HYPRLAND_FILE"; then
+      ! chmod --reference="$real" "$tmp" ||
+      ! mv "$tmp" "$real"; then
       rm -f "$tmp"
       fail "could not update $HYPRLAND_FILE (left unchanged)"
     fi
   fi
   rm -f "$MODULE_FILE"
-  hyprctl reload >/dev/null || true
+  hyprctl reload >/dev/null 2>&1 || echo "languagectl: hyprctl reload failed; run it yourself to apply" >&2
   echo "Keyboard languages reset to your Hyprland config."
 }
 

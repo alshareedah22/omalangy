@@ -110,6 +110,56 @@ has "next start finishes it" "$(cat "$HOME/.config/hypr/keyboard-languages.lua" 
 eq "and marks it done" "$("$CTL" setup)" "already set up"
 eq "the bar is not changed twice" "$(ids center)" '["omarchy.clock","blackcode.omalangy","omarchy.weather"]'
 
+echo "Other bar sections, bare strings, symlinks, commented hook"
+fresh
+cat >"$SJ" <<'J'
+{"bar":{"layout":{"left":[],"centerBegin":[{"id":"blackcode.omalangy"}],"center":[],"centerEnd":[{"id":"omarchy.keyboard-layout","x":2}],"right":["omarchy.tray"],"tray":[]}}}
+J
+"$CTL" setup >/dev/null 2>&1
+eq "keyboard-layout in centerEnd is replaced" "$(jq -c '.bar.layout.centerEnd' "$SJ")" '[{"id":"blackcode.omalangy"}]'
+eq "OmaLangy left centerBegin" "$(jq -c '.bar.layout.centerBegin' "$SJ")" '[]'
+"$CTL" uninstall >/dev/null 2>&1
+eq "uninstall restores it in centerEnd" "$(jq -c '.bar.layout.centerEnd' "$SJ")" '[{"id":"omarchy.keyboard-layout","x":2},{"id":"blackcode.omalangy"}]'
+fresh
+cat >"$SJ" <<'J'
+{"bar":{"layout":{"left":[],"center":[],"right":["omarchy.tray",{"id":"blackcode.omalangy"}],"tray":["omarchy.keyboard-layout"]}}}
+J
+"$CTL" setup >/dev/null 2>&1
+eq "keyboard-layout in tray (bare string) is replaced" "$(jq -c '.bar.layout.tray' "$SJ")" '[{"id":"blackcode.omalangy"}]'
+eq "bare-string entries stay strings" "$(jq -c '.bar.layout.right' "$SJ")" '["omarchy.tray"]'
+fresh
+cat >"$SJ" <<'J'
+{"bar":{"layout":{"left":["omarchy.menu"],"center":["omarchy.clock","omarchy.keyboard-layout"],"right":["omarchy.tray","blackcode.omalangy"]}}}
+J
+"$CTL" setup >/dev/null 2>&1
+eq "bare-string OmaLangy takes a bare-string built-in's place" "$(jq -c '.bar.layout.center' "$SJ")" '["omarchy.clock","blackcode.omalangy"]'
+eq "shell.json backup kept" "$(test -f "$SJ.omalangy-backup" && echo yes)" "yes"
+"$CTL" uninstall >/dev/null 2>&1
+eq "bare-string built-in comes back as a string" "$(jq -c '.bar.layout.center' "$SJ")" '["omarchy.clock","omarchy.keyboard-layout","blackcode.omalangy"]'
+rm -f "$SJ.omalangy-backup"
+
+fresh
+mkdir -p "$T/dots"
+mv "$SJ" "$T/dots/shell.json"; ln -s "$T/dots/shell.json" "$SJ"
+mv "$HOME/.config/hypr/hyprland.lua" "$T/dots/hyprland.lua"; ln -s "$T/dots/hyprland.lua" "$HOME/.config/hypr/hyprland.lua"
+"$CTL" setup >/dev/null 2>&1
+if [[ -L $SJ ]]; then ok "shell.json symlink survives"; else bad "shell.json symlink survives"; fi
+if [[ -L $HOME/.config/hypr/hyprland.lua ]]; then ok "hyprland.lua symlink survives"; else bad "hyprland.lua symlink survives"; fi
+eq "the target got the edit" "$(jq -c '[.bar.layout.center[].id]' "$T/dots/shell.json")" '["omarchy.clock","blackcode.omalangy","omarchy.weather"]'
+has "the hook went into the target" "$(cat "$T/dots/hyprland.lua")" 'pcall(require, "hypr.keyboard-languages")'
+"$CTL" uninstall >/dev/null 2>&1
+if [[ -L $SJ && -L $HOME/.config/hypr/hyprland.lua ]]; then ok "symlinks survive uninstall"; else bad "symlinks survive uninstall"; fi
+eq "uninstall removed the hook from the target" "$(grep -c keyboard-languages "$T/dots/hyprland.lua")" "0"
+eq "one hyprland.lua backup only" "$(ls "$T/dots" | grep -c 'hyprland.lua.omalangy-backup')" "1"
+rm -f "$HOME/.config/hypr/hyprland.lua" "$SJ"; printf -- '-- hyprland\n' >"$HOME/.config/hypr/hyprland.lua"; rm -f "$T/dots"/*backup
+
+fresh
+printf -- '-- hyprland\n-- pcall(require, "hypr.keyboard-languages")\n' >"$HOME/.config/hypr/hyprland.lua"
+"$CTL" setup >/dev/null 2>&1
+eq "a commented-out hook does not count: live hook added" "$(grep -cE '^[[:space:]]*pcall\(require, "hypr.keyboard-languages"\)' "$HOME/.config/hypr/hyprland.lua")" "1"
+eq "module is world-readable" "$(stat -c %a "$HOME/.config/hypr/keyboard-languages.lua")" "644"
+printf -- '-- hyprland\n' >"$HOME/.config/hypr/hyprland.lua"
+
 echo
 echo "$passed passed, $failed failed"
 ((failed == 0))

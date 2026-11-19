@@ -68,10 +68,20 @@ Panel {
     return typeof entry === "string" ? entry : (entry && entry.id ? String(entry.id) : "")
   }
 
+  // Omarchy 4.5 bar sections, in bar order; any other array in the layout is searched too.
+  readonly property var barSections: {
+    const known = ["left", "centerBegin", "center", "centerEnd", "right", "tray"]
+    Object.keys(root.barLayout || {}).forEach(function(k) {
+      if (known.indexOf(k) === -1 && Array.isArray(root.barLayout[k])) known.push(k)
+    })
+    return known
+  }
+
   readonly property var placement: {
-    const sections = ["left", "center", "right"]
+    const sections = root.barSections
     for (let i = 0; i < sections.length; i++) {
-      const ids = (root.barLayout[sections[i]] || []).map(root.entryId)
+      const list = root.barLayout[sections[i]]
+      const ids = (Array.isArray(list) ? list : []).map(root.entryId)
       const at = ids.indexOf(root.moduleName)
       if (at !== -1) return { section: sections[i], index: at, ids: ids }
     }
@@ -89,7 +99,8 @@ Panel {
 
   function moveTo(section, where) {
     if (!root.bar) return
-    const others = (root.barLayout[section] || []).map(root.entryId).filter(function(id) { return id !== root.moduleName })
+    const list = root.barLayout[section]
+    const others = (Array.isArray(list) ? list : []).map(root.entryId).filter(function(id) { return id !== root.moduleName })
     let place = "--section " + section + " --index " + (where === "Start" ? 0 : others.length)
     if (where === "Next to clock" && others.indexOf("omarchy.clock") !== -1) place = "--after omarchy.clock"
     root.close()
@@ -102,8 +113,10 @@ Panel {
     watchChanges: true
     onFileChanged: reload()
     onLoaded: {
-      try { root.barLayout = (JSON.parse(text()).bar || {}).layout || {} } catch (e) {}
+      try { root.barLayout = (JSON.parse(text()).bar || {}).layout || {} }
+      catch (e) { root.errorText = "Could not read shell.json: " + e }
     }
+    onLoadFailed: root.errorText = "Could not read ~/.config/omarchy/shell.json"
   }
 
   // ---- Search ----
@@ -273,11 +286,18 @@ Panel {
   Process {
     id: stateProc
     command: [root.ctl, "state"]
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") root.errorText = text.trim()
+    }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         let s
-        try { s = JSON.parse(text) } catch (e) { return }
+        try { s = JSON.parse(text) } catch (e) {
+          root.errorText = "Could not read the keyboard state: " + (text.trim() !== "" ? text.trim() : e)
+          return
+        }
         root.layouts = s.layouts || []
         root.variants = s.variants || []
         root.activeIndex = s.active || 0
@@ -319,6 +339,13 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.catalog = LanguageModel.parseCatalog(text)
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") root.errorText = "xkbcli: " + text.trim()
+    }
+    onExited: function(code) {
+      if (code !== 0) root.errorText = "Could not list keyboard layouts (xkbcli exited with " + code + ")"
     }
   }
 
@@ -600,7 +627,14 @@ Panel {
         width: parent.width
         spacing: Style.space(6)
         Repeater {
-          model: [{ label: "Left", value: "left" }, { label: "Center", value: "center" }, { label: "Right", value: "right" }]
+          model: {
+            const chips = [{ label: "Left", value: "left" }, { label: "Center left", value: "centerBegin" }, { label: "Center", value: "center" },
+              { label: "Center right", value: "centerEnd" }, { label: "Right", value: "right" }]
+            const here = root.placement.section
+            if (here !== "" && !chips.some(function(c) { return c.value === here }))
+              chips.push({ label: here, value: here })
+            return chips
+          }
           Chip {
             required property var modelData
             label: modelData.label

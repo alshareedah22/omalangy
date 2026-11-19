@@ -18,6 +18,17 @@ On the bar itself: **left-click** opens the panel, **right-click** or
 **middle-click** switches to the next language, and **scroll** switches to the
 next (scroll down) or previous (scroll up) language.
 
+**Compatibility:** works with Omarchy 4.5 (checked on 4.5.0-3: manifest validation, the plugin's own tests, and every Omarchy component, command and bar interface it uses).
+
+## What's new in 1.4.1
+
+- Finds the built-in keyboard label (and OmaLangy) in every bar section: `left`, `centerBegin`,
+  `center`, `centerEnd`, `right`, `tray`. Bare-string bar entries are handled.
+- Edits to `shell.json` and `hyprland.lua` go through symlinks, keep one backup, and re-check
+  the file before writing. A commented-out hook line no longer counts as installed.
+- The generated module is world-readable, `hyprctl reload` failures are reported, and the
+  panel shows errors it used to swallow.
+
 ## Keybindings
 
 | Keys                      | Action                         | Notes |
@@ -47,7 +58,7 @@ Omarchy widget setting, and declared in `manifest.json` (`defaults` + `schema`).
 
 | Setting           | Values                                              | Default |
 |-------------------|-----------------------------------------------------|---------|
-| Position          | Left, Center, Right · Start, Next to clock, End     | Right (`defaultSection` in the manifest) |
+| Position          | Left, Center left, Center, Center right, Right (and Tray, if it is there) · Start, Next to clock, End     | Right (`defaultSection` in the manifest) |
 | `label`           | `Icon and code`, `Code only`, `Icon only`           | `Icon and code` |
 | `switchKeys`      | `Both Alt keys`, `Menu key`, `Right Ctrl`, `Off`    | `Both Alt keys` |
 | `nextLanguageKey` | a Hyprland combo (letters, digits, `_`, `+`), or empty to turn off | `SUPER + SHIFT + K` |
@@ -67,14 +78,22 @@ omarchy bar set blackcode.omalangy panelKey ""
 
 ## Safe by design
 
-- **Nothing changes until you ask.** Installing the plugin only adds the bar
-  icon. Your Hyprland config is first touched when you add, remove or reorder
-  a language, or change a switch key or keybinding in the panel. Until then
-  the panel says "Not set up yet".
+- **First start sets itself up** (see Install). That first run is not "nothing": it runs
+  `languagectl apply`, which writes `keyboard-languages.lua`, appends the hook line to
+  `hyprland.lua`, moves OmaLangy to the built-in label's place in `shell.json`, and runs
+  `hyprctl reload`. With two or more layouts it also **replaces any `grp:` switch option you
+  had** (your own layout-switch shortcut) with the one chosen in Settings (default: both Alt
+  keys). Your other keyboard options are kept. Changes after that happen only when you add,
+  remove or reorder a language, or change a switch key or shortcut in the panel.
+- Layouts are set for all keyboards; per-device layouts set in your own config are not
+  kept separately.
+- Files edited through a symlink (stow, chezmoi) are written at the real file, so the link
+  survives. One backup is kept: `shell.json.omalangy-backup` and `hyprland.lua.omalangy-backup`
+  (created once, next to the file).
 
 - Your languages are saved to their own file, `~/.config/hypr/keyboard-languages.lua`.
   Your `input.lua` and other Hyprland files are never rewritten.
-- `hyprland.lua` gets one line appended (a backup is saved next to it first):
+- `hyprland.lua` gets one line appended (a single backup is saved next to it first):
   `pcall(require, "hypr.keyboard-languages")`. Because it runs through `pcall`,
   a missing or broken file can never stop Hyprland from loading.
 - Your other keyboard options (Caps Lock compose key, both-Shifts Caps Lock, ...)
@@ -131,7 +150,7 @@ omarchy plugin remove blackcode.omalangy
 `languagectl uninstall` puts Omarchy's keyboard label back on the bar if OmaLangy took its
 place, deletes `~/.config/hypr/keyboard-languages.lua` (your
 languages and the plugin's keybindings), removes the hook line and its comment
-from `~/.config/hypr/hyprland.lua` (a `hyprland.lua.bak.<time>` backup is left
+from `~/.config/hypr/hyprland.lua` (a `hyprland.lua.omalangy-backup` backup is left
 next to it), then runs `hyprctl reload` so your own `input.lua` settings apply
 again. Remove the plugin right after: if the bar widget is still running, a
 later settings change in its panel would set the module up again.
@@ -155,7 +174,7 @@ keybindings stay active until you clean up by hand:
    as the comment; delete that one too if you see it.
 3. Run `hyprctl reload`.
 
-The `hyprland.lua.bak.<time>` files the plugin created are only backups and are
+The `*.omalangy-backup` files (and `hyprland.lua.bak.<time>` from older versions) the plugin created are only backups and are
 safe to delete.
 
 ## Command line
