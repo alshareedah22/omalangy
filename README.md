@@ -115,7 +115,7 @@ omarchy bar set blackcode.omalangy panelKey ""
 From git:
 
 ```bash
-omarchy plugin add https://github.com/alshareedah22/omalangy.git --enable
+omarchy plugin add https://github.com/blackcodesh/omalangy.git --enable
 ```
 
 Or from a local copy:
