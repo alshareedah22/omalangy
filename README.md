@@ -138,6 +138,8 @@ That is all: nothing to configure. On its first start OmaLangy sets itself up:
 This runs once. Anything you change afterwards is never redone; `languagectl setup` is the
 command behind it.
 
+Also listed in the Omarchy plugin marketplace (https://plugins.omarchy.org): search for **OmaLangy**.
+
 ## Remove
 
 Run the uninstall **first**, while the plugin is still installed:
@@ -202,3 +204,7 @@ languagectl uninstall
 ```bash
 tests/test-setup.sh     # first-run setup and uninstall, in a throwaway HOME
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
