@@ -20,6 +20,15 @@ next (scroll down) or previous (scroll up) language.
 
 **Compatibility:** works with Omarchy 4.5 (checked on 4.5.0-3: manifest validation, the plugin's own tests, and every Omarchy component, command and bar interface it uses).
 
+## What's new in 1.4.2
+
+- The keyboard search field is disabled, cleared and unfocused while the panel is closed, so it can
+  no longer stall on a clipboard offer.
+- Setup retries the Hyprland hook when the keyboard module already exists, and only marks itself
+  complete once the hook is really in place.
+- Bar-config updates are read back and checked. If `shell.json` cannot be updated, setup is not
+  marked complete and uninstall stops with an error instead of reporting a reset.
+
 ## What's new in 1.4.1
 
 - Finds the built-in keyboard label (and OmaLangy) in every bar section: `left`, `centerBegin`,

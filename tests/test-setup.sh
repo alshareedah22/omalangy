@@ -160,6 +160,49 @@ eq "a commented-out hook does not count: live hook added" "$(grep -cE '^[[:space
 eq "module is world-readable" "$(stat -c %a "$HOME/.config/hypr/keyboard-languages.lua")" "644"
 printf -- '-- hyprland\n' >"$HOME/.config/hypr/hyprland.lua"
 
+echo "Hook retried, bar failures not reported as success"
+HF="$HOME/.config/hypr/hyprland.lua"
+fresh
+printf -- '-- mine\n' >"$HOME/.config/hypr/keyboard-languages.lua"
+printf -- '-- hyprland\n' >"$HF"
+chmod 555 "$HOME/.config/hypr"
+"$CTL" setup >/dev/null 2>"$T/err"
+chmod 755 "$HOME/.config/hypr"
+eq "hook that cannot be written: not hooked" "$(grep -c keyboard-languages "$HF")" "0"
+if [[ ! -e $XDG_STATE_HOME/omalangy/setup-done ]]; then ok "hook failure: setup not marked complete"; else bad "hook failure: setup not marked complete"; fi
+"$CTL" setup >/dev/null 2>&1
+eq "module present but unhooked: next start installs the hook" "$(grep -cE '^[[:space:]]*pcall\(require, "hypr.keyboard-languages"\)' "$HF")" "1"
+eq "existing module still untouched" "$(cat "$HOME/.config/hypr/keyboard-languages.lua")" "-- mine"
+eq "and now marks setup done" "$("$CTL" setup)" "already set up"
+printf -- '-- hyprland\n' >"$HF"
+
+fresh
+chmod 555 "$HOME/.config/omarchy"
+out=$("$CTL" setup 2>&1); rc=$?
+chmod 755 "$HOME/.config/omarchy"
+if ((rc != 0)); then ok "bar update failed: setup fails"; else bad "bar update failed: setup fails"; fi
+has "bar update failed: says so" "$out" "setup is not complete"
+if [[ ! -e $XDG_STATE_HOME/omalangy/setup-done ]]; then ok "bar update failed: no marker"; else bad "bar update failed: no marker"; fi
+eq "bar update failed: bar unchanged" "$(ids center)" '["omarchy.clock","omarchy.keyboard-layout","omarchy.weather"]'
+"$CTL" setup >/dev/null 2>&1
+eq "retry after the bar is writable completes" "$(ids center)" '["omarchy.clock","blackcode.omalangy","omarchy.weather"]'
+eq "retry marks setup done" "$("$CTL" setup)" "already set up"
+chmod 555 "$HOME/.config/omarchy"
+out=$("$CTL" uninstall 2>&1); rc=$?
+chmod 755 "$HOME/.config/omarchy"
+if ((rc != 0)); then ok "unrestorable bar: uninstall fails"; else bad "unrestorable bar: uninstall fails"; fi
+if [[ $out != *"reset to your Hyprland"* ]]; then ok "unrestorable bar: no reset reported"; else bad "unrestorable bar: no reset reported"; fi
+if [[ -e $XDG_STATE_HOME/omalangy/setup-done && -f $HOME/.config/hypr/keyboard-languages.lua ]]; then ok "unrestorable bar: nothing else torn down"; else bad "unrestorable bar: nothing else torn down"; fi
+"$CTL" uninstall >/dev/null 2>&1
+eq "uninstall succeeds once writable" "$(ids center | jq -c 'index("omarchy.keyboard-layout") != null')" "true"
+fresh
+
+echo "Search field (Panel.qml)"
+qml=$(cat "$here/Panel.qml")
+has "search field is disabled while closed" "$qml" "enabled: root.opened"
+has "search field is read-only while closed" "$qml" "readOnly: !root.opened"
+has "closing drops focus" "$qml" "searchField.focus = false"
+
 echo
 echo "$passed passed, $failed failed"
 ((failed == 0))

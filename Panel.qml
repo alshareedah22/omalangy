@@ -250,6 +250,11 @@ Panel {
       ensureCatalog()
       root.errorText = ""
       searchField.text = ""
+    } else {
+      // A closed panel must not keep an editable, focused text field: a clipboard offer
+      // reaching the shell could stall it.
+      searchField.text = ""
+      searchField.focus = false
     }
   }
 
@@ -799,6 +804,8 @@ Panel {
       TextField {
         id: searchField
         width: parent.width
+        enabled: root.opened
+        readOnly: !root.opened
         foreground: root.fg
         placeholderText: "Search: Arabic, عربي, French, 日本語…"
         onTextChanged: root.query = text

@@ -331,6 +331,8 @@ update_shell_json() {
       rm -f "$tmp"
       fail "could not write $SHELL_JSON (left unchanged)"
     fi
+    # Read it back: success only if the file now holds what we wrote.
+    [[ $(cat "$real") == "$NEW_JSON" ]] || fail "$SHELL_JSON does not hold the update after writing; check it"
     return 0
   done
   fail "$SHELL_JSON keeps changing; left unchanged"
@@ -370,14 +372,24 @@ setup_bar() {
     echo "OmaLangy now sits where the built-in keyboard label was ($(jq -r '.section' "$REPLACED_FILE"))"
   else
     [[ -z $out ]] || echo "$out"
-    return 0
+    # 2 = nothing to do (label absent, invalid JSON, ...): fine, but any other code means the
+    # bar update was attempted and failed: report it so setup is not marked complete.
+    ((rc == 2)) && return 0
+    rm -f "$REPLACED_FILE"
+    return 1
   fi
 }
 
 # The default shortcuts and switch keys from the manifest, applied to the layouts Hyprland
 # already has. apply keeps every other keyboard option and skips keys that are taken.
 setup_keys() {
-  [[ -f $MODULE_FILE ]] && { echo "keyboard module already there: shortcuts left as they are"; return 0; }
+  # The module can exist while its hook is missing (an earlier hook install failed): make
+  # sure the hook is really there, and fail (so setup is not marked done) if it is not.
+  if [[ -f $MODULE_FILE ]]; then
+    ensure_hook
+    echo "keyboard module already there: shortcuts left as they are"
+    return 0
+  fi
   local layouts variants switch next panel
   layouts=$(option_str input:kb_layout)
   variants=$(option_str input:kb_variant)
@@ -391,12 +403,17 @@ setup_keys() {
 
 setup() {
   [[ -e $SETUP_MARKER ]] && { echo "already set up"; return 0; }
-  setup_bar
+  local bar_ok=1
+  setup_bar || bar_ok=0
   # its own process, so a failure (Hyprland not answering yet) cannot stop this one halfway;
   # without the marker, the next start tries again (the bar step above is safe to repeat)
   if ! "$0" setup-keys; then
     echo "shortcuts not turned on yet; trying again on the next start" >&2
     return 0
+  fi
+  if ((!bar_ok)); then
+    echo "the bar could not be updated; setup is not complete and will be retried on the next start" >&2
+    return 1
   fi
   mkdir -p "$STATE_DIR"
   : >"$SETUP_MARKER"
@@ -415,7 +432,9 @@ restore_bar_edit() {
 
 restore_bar() {
   [[ -f $REPLACED_FILE && -f $SHELL_JSON ]] || return 0
-  update_shell_json restore_bar_edit || return 0
+  local rc=0
+  update_shell_json restore_bar_edit || rc=$?
+  ((rc == 0)) || fail "could not put the built-in keyboard label back ($SHELL_JSON unchanged); nothing was reset"
   rm -f "$REPLACED_FILE"
   echo "The built-in keyboard label is back on the bar."
 }
